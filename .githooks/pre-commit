@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Pre-commit hook: format staged C++/CUDA sources with clang-format, then
+# re-stage the result so the commit contains the formatted code.
+#
+# Uses the repo-root .clang-format (clang-format picks it up automatically
+# because git runs hooks from the top of the working tree).
+
+set -euo pipefail
+
+if ! command -v clang-format >/dev/null 2>&1; then
+    echo "pre-commit: clang-format not found; skipping format check" >&2
+    exit 0
+fi
+
+files=$(git diff --cached --name-only --diff-filter=ACM \
+    | grep -E '\.(c|h|cc|cpp|cxx|hpp|hh|cuh|cu)$' || true)
+
+if [ -z "$files" ]; then
+    exit 0
+fi
+
+printf '%s\n' "$files" | xargs clang-format -i
+printf '%s\n' "$files" | xargs git add
+
+printf 'pre-commit: clang-formatted %s file(s)\n' "$(printf '%s\n' "$files" | wc -l)"
