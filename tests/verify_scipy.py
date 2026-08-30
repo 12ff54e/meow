@@ -32,10 +32,17 @@ def references() -> dict[str, tuple[np.ndarray, float]]:
     linear = least_squares(
         lambda x: design @ x - target, [0.2, 0.2], jac=lambda _: design,
         bounds=([0.0, 0.0], [1.0, 1.0]), **settings)
+
+    times = np.array([0.0, 0.25, 0.5, 1.0, 1.5, 2.0])
+    observations = 2.5 * np.exp(-0.7 * times) + 0.15
+    exponential = least_squares(
+        lambda x: x[0] * np.exp(-x[1] * times) + x[2] - observations,
+        [1.0, 0.2, 0.0], bounds=([0.0] * 3, [5.0] * 3), **settings)
     return {
         "rosenbrock": (unconstrained.x, unconstrained.cost),
         "bounded_rosenbrock": (bounded.x, bounded.cost),
         "bounded_linear": (linear.x, linear.cost),
+        "exponential": (exponential.x, exponential.cost),
     }
 
 

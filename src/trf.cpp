@@ -409,10 +409,11 @@ Eigen::VectorXi active_constraints(const Vector& x,
             tolerance * std::max(1.0, std::abs(lower[i]));
         const double upper_threshold =
             tolerance * std::max(1.0, std::abs(upper[i]));
-        if (lower_distance <= lower_threshold &&
+        if (std::isfinite(lower[i]) && lower_distance <= lower_threshold &&
             lower_distance <= upper_distance) {
             active[i] = -1;
-        } else if (upper_distance <= upper_threshold) {
+        } else if (std::isfinite(upper[i]) &&
+                   upper_distance <= upper_threshold) {
             active[i] = 1;
         }
     }

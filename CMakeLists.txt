@@ -5,6 +5,7 @@ project(meow VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(MEOW_BUILD_TESTS "Build the meow test suite" ON)
+option(MEOW_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
@@ -19,21 +20,33 @@ target_include_directories(
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 
-if(MSVC)
-    target_compile_options(meow_trf PRIVATE /W4)
-else()
-    target_compile_options(meow_trf PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+function(meow_enable_warnings target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+        if(MEOW_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+        if(MEOW_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
+    endif()
+endfunction()
+
+meow_enable_warnings(meow_trf)
 
 if(MEOW_BUILD_TESTS)
     enable_testing()
 
     add_executable(test_trf tests/test_trf.cpp)
     target_link_libraries(test_trf PRIVATE meow::trf)
+    meow_enable_warnings(test_trf)
     add_test(NAME trf_unit COMMAND test_trf)
 
     add_executable(trf_reference_cases tests/reference_cases.cpp)
     target_link_libraries(trf_reference_cases PRIVATE meow::trf)
+    meow_enable_warnings(trf_reference_cases)
 
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)

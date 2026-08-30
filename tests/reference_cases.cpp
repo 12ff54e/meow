@@ -1,5 +1,6 @@
 #include "meow/trf.hpp"
 
+#include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -64,5 +65,26 @@ int main() {
     print_result(
         "bounded_linear",
         meow::trf_least_squares(linear, x0, box, options, linear_jacobian));
+
+    constexpr double times[] = {0.0, 0.25, 0.5, 1.0, 1.5, 2.0};
+    meow::Vector observations(6);
+    for (Eigen::Index i = 0; i < observations.size(); ++i) {
+        observations[i] = 2.5 * std::exp(-0.7 * times[i]) + 0.15;
+    }
+    const auto exponential = [observations, &times](const meow::Vector& x) {
+        meow::Vector value(observations.size());
+        for (Eigen::Index i = 0; i < value.size(); ++i) {
+            value[i] =
+                x[0] * std::exp(-x[1] * times[i]) + x[2] - observations[i];
+        }
+        return value;
+    };
+    meow::Vector exponential_x0(3);
+    exponential_x0 << 1.0, 0.2, 0.0;
+    const meow::Bounds positive_box{meow::Vector::Zero(3),
+                                    meow::Vector::Constant(3, 5.0)};
+    print_result("exponential",
+                 meow::trf_least_squares(exponential, exponential_x0,
+                                         positive_box, options));
     return 0;
 }
