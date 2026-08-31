@@ -51,7 +51,13 @@ int main(int argc, char** argv) {
         }
 
         cumes::EquilibriumSolver solver;
-        const cumes::SolveOutcome solved = solver.solve(validated.value());
+        cumes::SolveRequest solve_request;
+        if (target_name == "qh") {
+            solve_request.radial_transfer =
+                cumes::RadialTransferPolicy::CATMULL_ROM;
+        }
+        const cumes::SolveOutcome solved =
+            solver.solve(validated.value(), solve_request);
         if (!solved.converged || !solved.has_complete_equilibrium()) {
             std::cerr << "cuMES equilibrium did not converge: failed_stage="
                       << solved.failed_stage << " fsqr=" << solved.fsqr
@@ -92,7 +98,10 @@ int main(int argc, char** argv) {
         std::cout << "{\n"
                   << "  \"case\": \"" << target_name << "\",\n"
                   << "  \"converged\": true,\n"
-                  << "  \"iterations\": " << solved.iterations << ",\n"
+                  << "  \"final_stage_iterations\": " << solved.iterations
+                  << ",\n"
+                  << "  \"total_iterations\": " << solved.total_iterations
+                  << ",\n"
                   << "  \"fsqr\": " << solved.fsqr << ",\n"
                   << "  \"fsqz\": " << solved.fsqz << ",\n"
                   << "  \"fsql\": " << solved.fsql << ",\n"

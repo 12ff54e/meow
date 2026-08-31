@@ -124,10 +124,35 @@ wout files are later high-resolution convergence re-solves. They intentionally
 produce different target values, so both baselines must remain distinguishable.
 
 The checked-in `examples/landreman/qa.json` and `qh.json` are generated with
-`vmec_namelist_to_cumes_json.py --minimum-ftol 1e-16 --wout-axis <wout>`. The
+`vmec_namelist_to_cumes_json.py --minimum-ftol 1e-12 --wout-axis <wout>`. The
 explicit clamp is required because the archived VMEC convergence study
-requests `1e-17` and `2e-17`, below cuMES's verified-double tolerance floor.
+requests `1e-17` and `2e-17`. Although cuMES accepts tolerances down to
+`1e-16`, the imported QA coarse-grid trajectory stalls near `8e-13`; `1e-12`
+is the qualified 3-D convergence scale and remains far below the QS target.
 The explicit axis import replaces the namelists' zero axis placeholder, for
 which VMEC applies an internal automatic initialization that cuMES does not
 duplicate. Boundary, flux, current, resolution, and stage-size data are
 otherwise retained.
+
+The QH run explicitly selects the retained Catmull-Rom radial transfer. The
+default global B-spline transfer converges through `ns=100` but overshoots near
+the LCFS during the `100 -> 150` transition, producing an invalid Jacobian.
+Catmull-Rom completes both remaining stages. This is solver-path provenance,
+not part of the target definition.
+
+## cuMES final-boundary cross-check
+
+`cumes_landreman_evaluate` solves the checked-in final boundaries and applies
+the same 11-surface, 63x64 target in meow. With the solver adaptations above:
+
+| case | composite objective | weighted QS | unweighted QS | aspect | mean iota |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| QA | 1.780812493182744e-6 | 1.780751753144979e-6 | 1.048284137018133e-7 | 6.000007793589530 | 0.419325650931308 |
+| QH | 4.727458337966436e-5 | 4.727445645358373e-5 | 2.784061841868241e-5 | 8.000011266147551 | -1.243256718499347 |
+
+QA ends with `(fsqr,fsqz,fsql) = (9.931e-13,5.281e-13,9.056e-14)`.
+QH ends with `(9.966e-13,7.400e-13,1.563e-13)`. These are successful
+cuMES equilibria according to the adapted `1e-12` gate, but their QS values
+do not equal the archived VMEC terminal metrics. The difference is therefore
+reported as a cross-solver/discretization discrepancy, concentrated toward
+the heavily weighted edge, rather than hidden by target renormalization.
