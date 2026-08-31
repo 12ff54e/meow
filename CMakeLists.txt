@@ -77,6 +77,16 @@ if(MEOW_BUILD_TESTS)
     add_test(NAME trf_unit COMMAND test_trf)
 
     if(MEOW_BUILD_CUMES_INTEGRATION)
+        add_executable(test_boundary_parameterization
+                       tests/test_boundary_parameterization.cpp)
+        target_include_directories(test_boundary_parameterization PRIVATE
+                                   ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+        target_link_libraries(test_boundary_parameterization PRIVATE
+                              meow::cumes_targets)
+        meow_enable_warnings(test_boundary_parameterization)
+        add_test(NAME boundary_parameterization_unit
+                 COMMAND test_boundary_parameterization)
+
         foreach(target IN ITEMS plasma_size magnetic_gradient quasisymmetry)
             add_executable(test_${target}_target tests/test_${target}_target.cpp)
             target_include_directories(test_${target}_target PRIVATE
