@@ -134,6 +134,11 @@ which VMEC applies an internal automatic initialization that cuMES does not
 duplicate. Boundary, flux, current, resolution, and stage-size data are
 otherwise retained.
 
+The separate `qa_start.json` and `qh_start.json` files come from iteration zero
+of the archived final-refinement directories, not from the terminal or later
+high-resolution configurations. They contain modes through 4 and are the
+correct inputs to the two-stage `max_mode=4`, then `max_mode=5` reproduction.
+
 The QH run explicitly selects the retained Catmull-Rom radial transfer. The
 default global B-spline transfer converges through `ns=100` but overshoots near
 the LCFS during the `100 -> 150` transition, producing an invalid Jacobian.
