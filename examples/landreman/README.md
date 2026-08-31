@@ -28,11 +28,13 @@ QH_RUN="$CALC/20210704-01-059_QH_A8_refiningBestFrom039_weightRampScan/weight_2.
 
 scripts/vmec_namelist_to_cumes_json.py \
   "$QA_RUN/input.nfp2_QA" examples/landreman/qa_start.json \
-  --minimum-ftol 1e-12 --wout-axis "$QA_RUN/wout_nfp2_QA_000_000000.nc"
+  --minimum-ftol 1e-12 --minimum-niter 6000 \
+  --wout-axis "$QA_RUN/wout_nfp2_QA_000_000000.nc"
 
 scripts/vmec_namelist_to_cumes_json.py \
   "$QH_RUN/input.nfp4_QH" examples/landreman/qh_start.json \
-  --minimum-ftol 1e-12 --wout-axis "$QH_RUN/wout_nfp4_QH_000_000000.nc"
+  --minimum-ftol 1e-12 --minimum-niter 10000 \
+  --wout-axis "$QH_RUN/wout_nfp4_QH_000_000000.nc"
 ```
 
 The tolerance clamp and axis import are documented in

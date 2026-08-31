@@ -91,7 +91,7 @@ def _read_assignments(text):
     return assignments, harmonics
 
 
-def convert_text(text, minimum_ftol=None):
+def convert_text(text, minimum_ftol=None, minimum_niter=None):
     assignments, harmonics = _read_assignments(text)
     unknown = sorted(set(assignments) - SUPPORTED_KEYS)
     if unknown:
@@ -125,6 +125,12 @@ def convert_text(text, minimum_ftol=None):
         output["ftol_array"] = [
             max(value, minimum_ftol) for value in output["ftol_array"]
         ]
+    if minimum_niter is not None and "niter_array" in output:
+        if minimum_niter <= 0:
+            raise ValueError("minimum_niter must be positive")
+        output["niter_array"] = [
+            max(value, minimum_niter) for value in output["niter_array"]
+        ]
     for key in STRING_KEYS:
         if key in assignments:
             output[key] = _string(assignments[key])
@@ -149,9 +155,11 @@ def convert_text(text, minimum_ftol=None):
     return output
 
 
-def convert_file(input_path, output_path, minimum_ftol=None):
+def convert_file(input_path, output_path, minimum_ftol=None,
+                 minimum_niter=None):
     converted = convert_text(
-        Path(input_path).read_text(encoding="utf-8"), minimum_ftol)
+        Path(input_path).read_text(encoding="utf-8"), minimum_ftol,
+        minimum_niter)
     Path(output_path).write_text(
         json.dumps(converted, indent=2, sort_keys=True) + "\n",
         encoding="utf-8")
@@ -184,11 +192,15 @@ def main():
         "--minimum-ftol", type=float,
         help="explicitly clamp VMEC stage tolerances to this cuMES floor")
     parser.add_argument(
+        "--minimum-niter", type=int,
+        help="explicitly raise VMEC stage iteration caps for cuMES")
+    parser.add_argument(
         "--wout-axis", type=Path,
         help="replace VMEC's zero auto-axis input with an axis from this wout")
     arguments = parser.parse_args()
     converted = convert_text(
-        arguments.input.read_text(encoding="utf-8"), arguments.minimum_ftol)
+        arguments.input.read_text(encoding="utf-8"), arguments.minimum_ftol,
+        arguments.minimum_niter)
     if arguments.wout_axis is not None:
         converted["raxis_c"], converted["zaxis_s"] = read_wout_axis(
             arguments.wout_axis, converted["ntor"])

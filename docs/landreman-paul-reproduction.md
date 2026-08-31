@@ -138,6 +138,10 @@ The separate `qa_start.json` and `qh_start.json` files come from iteration zero
 of the archived final-refinement directories, not from the terminal or later
 high-resolution configurations. They contain modes through 4 and are the
 correct inputs to the two-stage `max_mode=4`, then `max_mode=5` reproduction.
+Their VMEC caps are raised explicitly with `--minimum-niter` because cuMES's
+coarse-grid descent has not reached the adapted `1e-12` gate after the
+archived 600 iterations. This changes only the solver work allowance, not the
+boundary, target, or convergence threshold.
 
 The QH run explicitly selects the retained Catmull-Rom radial transfer. The
 default global B-spline transfer converges through `ns=100` but overshoots near

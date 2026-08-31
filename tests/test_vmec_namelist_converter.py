@@ -41,12 +41,14 @@ class NamelistConverterTest(unittest.TestCase):
 &INDATA
   MPOL=2
   NTOR=0
+  NITER_ARRAY=100 200
   FTOL_ARRAY=1e-17 2e-16
   RBC(0,0)=1
   ZBS(0,0)=0
 /
-""", minimum_ftol=1e-16)
+""", minimum_ftol=1e-16, minimum_niter=150)
         self.assertEqual(clamped["ftol_array"], [1e-16, 2e-16])
+        self.assertEqual(clamped["niter_array"], [150, 200])
 
     def test_unknown_active_key_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "unsupported active"):
