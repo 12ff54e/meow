@@ -446,9 +446,10 @@ void validate_inputs(const ResidualFunction& residual,
         throw std::invalid_argument(
             "TRF tolerances must be nonnegative and not all zero");
     }
-    if (options.finite_difference_step < 0.0) {
+    if (options.finite_difference_step < 0.0 ||
+        options.finite_difference_absolute_step < 0.0) {
         throw std::invalid_argument(
-            "TRF finite_difference_step must be nonnegative");
+            "TRF finite-difference steps must be nonnegative");
     }
     if (options.x_scale.size() != 0 &&
         options.x_scale.size() != initial_x.size()) {
@@ -521,12 +522,15 @@ TrfResult trf_least_squares(const ResidualFunction& residual_function,
             jacobian = jacobian_function(point);
         } else {
             jacobian.resize(residual_count, variable_count);
-            const double relative_step = options.finite_difference_step > 0.0
-                                             ? options.finite_difference_step
-                                             : std::sqrt(EPSILON);
+            double relative_step = options.finite_difference_step;
+            double absolute_step = options.finite_difference_absolute_step;
+            if (relative_step == 0.0 && absolute_step == 0.0) {
+                relative_step = std::sqrt(EPSILON);
+                absolute_step = relative_step;
+            }
             for (Eigen::Index column = 0; column < variable_count; ++column) {
-                double step =
-                    relative_step * std::max(1.0, std::abs(point[column]));
+                double step = std::max(relative_step * std::abs(point[column]),
+                                       absolute_step);
                 if (point[column] + step > bounds.upper[column]) {
                     step = -step;
                 }

@@ -52,8 +52,13 @@ struct TrfOptions {
     // calls are included in this limit.
     std::size_t max_function_evaluations = 0;
 
-    // Relative forward-difference step. Zero selects sqrt(machine epsilon).
+    // Forward-difference steps are
+    // max(abs(x_j) * finite_difference_step,
+    //     finite_difference_absolute_step).
+    // If both are zero, the legacy/default rule
+    // sqrt(machine epsilon) * max(abs(x_j), 1) is used.
     double finite_difference_step = 0.0;
+    double finite_difference_absolute_step = 0.0;
 
     // Positive characteristic scales for x. An empty vector means all ones.
     Vector x_scale;

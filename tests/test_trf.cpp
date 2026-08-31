@@ -181,6 +181,30 @@ void test_invalid_bounds() {
     require(threw, "infeasible initial point was accepted");
 }
 
+void test_absolute_and_relative_finite_difference_steps() {
+    const auto residual = [](const meow::Vector& x) {
+        return (meow::Vector(1) << x[0] * x[0] + 1.0).finished();
+    };
+    meow::TrfOptions options;
+    options.finite_difference_step = 0.1;
+    options.finite_difference_absolute_step = 0.5;
+    options.max_function_evaluations = 2;
+
+    meow::Vector small(1);
+    small << 2.0;
+    const meow::TrfResult absolute_limited =
+        meow::trf_least_squares(residual, small, options);
+    require(std::abs(absolute_limited.jacobian(0, 0) - 4.5) < 1e-13,
+            "absolute finite-difference floor was not used");
+
+    meow::Vector large(1);
+    large << 20.0;
+    const meow::TrfResult relative_limited =
+        meow::trf_least_squares(residual, large, options);
+    require(std::abs(relative_limited.jacobian(0, 0) - 42.0) < 1e-13,
+            "relative finite-difference step was not used");
+}
+
 }  // namespace
 
 int main() {
@@ -192,6 +216,7 @@ int main() {
         test_upper_bound_and_one_sided_difference();
         test_rank_deficient_problem();
         test_invalid_bounds();
+        test_absolute_and_relative_finite_difference_steps();
     } catch (const std::exception& error) {
         std::cerr << "test_trf: " << error.what() << '\n';
         return 1;
