@@ -6,6 +6,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(MEOW_BUILD_TESTS "Build the meow test suite" ON)
 option(MEOW_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
+option(MEOW_BUILD_CUMES_INTEGRATION
+       "Build optimizer targets and examples backed by cuMES" OFF)
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
@@ -36,6 +38,30 @@ endfunction()
 
 meow_enable_warnings(meow_trf)
 
+if(MEOW_BUILD_CUMES_INTEGRATION)
+    if(NOT TARGET cumes::solver)
+        find_package(cuMES CONFIG REQUIRED)
+    endif()
+
+    add_library(meow_cumes_targets INTERFACE)
+    add_library(meow::cumes_targets ALIAS meow_cumes_targets)
+    target_compile_features(meow_cumes_targets INTERFACE cxx_std_20)
+    target_include_directories(
+        meow_cumes_targets
+        INTERFACE
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>)
+    target_link_libraries(meow_cumes_targets INTERFACE cumes::solver meow::trf)
+
+    add_executable(cumes_meow_optimize examples/cumes_optimize.cpp)
+    target_link_libraries(cumes_meow_optimize PRIVATE meow::cumes_targets)
+    meow_enable_warnings(cumes_meow_optimize)
+
+    add_executable(cumes_meow_qs_optimize examples/cumes_qs_optimize.cpp)
+    target_link_libraries(cumes_meow_qs_optimize PRIVATE meow::cumes_targets)
+    meow_enable_warnings(cumes_meow_qs_optimize)
+endif()
+
 if(MEOW_BUILD_TESTS)
     enable_testing()
 
@@ -43,6 +69,18 @@ if(MEOW_BUILD_TESTS)
     target_link_libraries(test_trf PRIVATE meow::trf)
     meow_enable_warnings(test_trf)
     add_test(NAME trf_unit COMMAND test_trf)
+
+    if(MEOW_BUILD_CUMES_INTEGRATION)
+        foreach(target IN ITEMS plasma_size magnetic_gradient quasisymmetry)
+            add_executable(test_${target}_target tests/test_${target}_target.cpp)
+            target_include_directories(test_${target}_target PRIVATE
+                                       ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+            target_link_libraries(test_${target}_target PRIVATE
+                                  meow::cumes_targets)
+            meow_enable_warnings(test_${target}_target)
+            add_test(NAME ${target}_target_unit COMMAND test_${target}_target)
+        endforeach()
+    endif()
 
     add_executable(trf_reference_cases tests/reference_cases.cpp)
     target_link_libraries(trf_reference_cases PRIVATE meow::trf)
