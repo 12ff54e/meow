@@ -67,8 +67,7 @@ class LandremanResidual {
         if (selected_case_ == LandremanCase::QH) {
             request.radial_transfer = cumes::RadialTransferPolicy::CATMULL_ROM;
         }
-        const cumes::SolveOutcome solved =
-            solver_.solve(validated.value(), request);
+        cumes::SolveOutcome solved = solver_.solve(validated.value(), request);
         ++evaluation_count_;
         if (!solved.converged || !solved.has_complete_equilibrium()) {
             throw std::runtime_error(
@@ -139,16 +138,17 @@ class LandremanResidual {
 void print_usage() {
     std::cerr
         << "usage: cumes_landreman_optimize INPUT.json qa|qh OUTPUT.json "
-           "[MAX_FUNCTION_EVALUATIONS_PER_STAGE]\n"
+           "[MAX_FUNCTION_EVALUATIONS_PER_STAGE [FIRST_MODE [LAST_MODE]]]\n"
         << "The archived final refinement is run first through boundary mode "
            "4, then through mode 5. Zero or an omitted evaluation limit uses "
-           "meow's 100*n default.\n";
+           "meow's 100*n default. FIRST_MODE/LAST_MODE can select 4 or 5 for "
+           "a checkpointed partial run.\n";
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc != 4 && argc != 5) {
+    if (argc < 4 || argc > 7) {
         print_usage();
         return 2;
     }
@@ -161,7 +161,14 @@ int main(int argc, char** argv) {
                 : throw std::invalid_argument("case must be qa or qh");
         const std::string output_path = argv[3];
         const std::size_t max_evaluations =
-            argc == 5 ? std::stoull(argv[4]) : 0;
+            argc >= 5 ? std::stoull(argv[4]) : 0;
+        const int first_mode = argc >= 6 ? std::stoi(argv[5]) : 4;
+        const int last_mode = argc >= 7 ? std::stoi(argv[6]) : 5;
+        if (first_mode < 4 || last_mode > 5 || first_mode > last_mode) {
+            throw std::invalid_argument(
+                "FIRST_MODE and LAST_MODE must select an ordered subset of "
+                "{4,5}");
+        }
 
         cumes::SolverOptions validation_options;
 #ifdef CUMES_USE_FLOAT
@@ -176,7 +183,7 @@ int main(int argc, char** argv) {
         cumes::ProblemSpec current = std::move(parsed.spec);
         write_problem(output_path, current, validation_options);
 
-        for (int max_mode : {4, 5}) {
+        for (int max_mode = first_mode; max_mode <= last_mode; ++max_mode) {
             cumes_meow_example::StellaratorSymmetricBoundaryParameterization
                 boundary(max_mode);
             const meow::Vector initial = boundary.values(current);

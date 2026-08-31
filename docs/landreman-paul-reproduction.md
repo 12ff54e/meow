@@ -102,6 +102,13 @@ definition. It persistently writes strict cuMES input JSON after accepted
 iterations, so a long run can be inspected or restarted without translating a
 diagnostic normalization document.
 
+Final-grid hot restarts were tested as a finite-difference acceleration and
+rejected: at the adapted `1e-12` equilibrium gate, a `1e-9` boundary change can
+follow a measurably different near-degenerate equilibrium path, contaminating
+the numerical Jacobian. The reproduction therefore uses the same cold
+multigrid path for every sample. Mode-range arguments allow the expensive
+stages to be checkpointed separately without changing this derivative policy.
+
 ## Acceptance evidence
 
 - Reference evaluation reproduces the supplemental SIMSOPT totals to roundoff.

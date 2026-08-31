@@ -61,3 +61,8 @@ input schema. The optional fourth argument caps function evaluations per
 stage; omit it for the meow default. Numerical Jacobians require 81 equilibrium
 solves at mode 4 and 121 at mode 5 before the first optimizer step, so these
 are intentionally long GPU runs.
+
+Two further optional arguments select the first and last mode stage. For
+example, append `0 4 4` to run mode 4 only, then use its `.mode4.json` as the
+input to a separate run ending in `0 5 5`. This is the supported checkpointed
+workflow for scheduler time limits.
