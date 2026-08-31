@@ -85,6 +85,8 @@ int main() {
     qa_spec.helicity_n = 0;
     qa_spec.half_surface_indices =
         cumes_meow_example::all_half_grid_surfaces(ns);
+    qa_spec.flux_gradient =
+        cumes_meow_example::QsFluxGradient::NORMALIZED_POLOIDAL;
     const auto qs = cumes_meow_example::calculate_quasisymmetry_target(
         equilibrium, profiles, input.nfp, qa_spec);
     check(qs.residuals.size() ==
@@ -115,6 +117,48 @@ int main() {
           "QH target: aspect residual appended");
     check(std::abs(qh.value - qh.qs.value) < 1.0e-13,
           "QH target: matched aspect leaves QS value");
+
+    cumes_meow_example::FluxSurfaceQuasisymmetryTargetSpec paper_grid;
+    paper_grid.helicity_m = 1;
+    paper_grid.helicity_n = 0;
+    paper_grid.normalized_toroidal_flux_surfaces = {0.0, 0.5, 1.0};
+    paper_grid.surface_weights = {1.0, 2.0, 3.0};
+    paper_grid.target_ntheta = 21;
+    paper_grid.target_nzeta = 20;
+    paper_grid.flux_gradient =
+        cumes_meow_example::QsFluxGradient::NORMALIZED_POLOIDAL;
+    const auto resampled = cumes_meow_example::calculate_quasisymmetry_target(
+        equilibrium, profiles, input.nfp, paper_grid);
+    check(resampled.residuals.size() == 3 * 21 * 20,
+          "flux-surface QS target uses the independent angular grid");
+    check(resampled.surface_values.size() == 3,
+          "flux-surface QS target includes axis, interior, and edge");
+    check(std::abs(resampled.value) < 1.0e-23,
+          "linear extrapolation and Fourier resampling preserve zero QS");
+
+    const auto paper_qa = cumes_meow_example::calculate_qa_target(
+        equilibrium, profiles, input, paper_grid, major_radius / minor_radius,
+        std::nullopt);
+    check(paper_qa.residuals.size() == resampled.residuals.size() + 1,
+          "paper final QA target omits the initial-stage iota residual");
+    const auto initial_qa = cumes_meow_example::calculate_qa_target(
+        equilibrium, profiles, input, paper_grid, major_radius / minor_radius,
+        iota);
+    check(initial_qa.residuals.size() == resampled.residuals.size() + 2,
+          "paper initial QA target can include the iota residual");
+
+    cumes_meow_example::FluxSurfaceQuasisymmetryTargetSpec archived_grid;
+    archived_grid.helicity_m = 1;
+    archived_grid.helicity_n = 0;
+    archived_grid.flux_gradient =
+        cumes_meow_example::QsFluxGradient::NORMALIZED_POLOIDAL;
+    for (int index = 0; index <= 10; ++index) {
+        archived_grid.normalized_toroidal_flux_surfaces.push_back(index / 10.0);
+    }
+    const auto archived = cumes_meow_example::calculate_quasisymmetry_target(
+        equilibrium, profiles, input.nfp, archived_grid);
+    check(archived.residuals.size() == 11 * 63 * 64,
+          "Landreman default target has 11*63*64 residuals");
 
     return meow::test::summary();
 }
