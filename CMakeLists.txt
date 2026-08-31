@@ -88,6 +88,10 @@ if(MEOW_BUILD_TESTS)
 
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
+        add_test(
+            NAME vmec_namelist_converter_unit
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vmec_namelist_converter.py)
         execute_process(
             COMMAND ${Python3_EXECUTABLE} -c "import scipy"
             RESULT_VARIABLE MEOW_SCIPY_RESULT

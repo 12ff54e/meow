@@ -123,3 +123,11 @@ optimization directory. The `configurations/new_QA` and `configurations/new_QH`
 wout files are later high-resolution convergence re-solves. They intentionally
 produce different target values, so both baselines must remain distinguishable.
 
+The checked-in `examples/landreman/qa.json` and `qh.json` are generated with
+`vmec_namelist_to_cumes_json.py --minimum-ftol 1e-16 --wout-axis <wout>`. The
+explicit clamp is required because the archived VMEC convergence study
+requests `1e-17` and `2e-17`, below cuMES's verified-double tolerance floor.
+The explicit axis import replaces the namelists' zero axis placeholder, for
+which VMEC applies an internal automatic initialization that cuMES does not
+duplicate. Boundary, flux, current, resolution, and stage-size data are
+otherwise retained.
