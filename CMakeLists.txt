@@ -60,6 +60,12 @@ if(MEOW_BUILD_CUMES_INTEGRATION)
     add_executable(cumes_meow_qs_optimize examples/cumes_qs_optimize.cpp)
     target_link_libraries(cumes_meow_qs_optimize PRIVATE meow::cumes_targets)
     meow_enable_warnings(cumes_meow_qs_optimize)
+
+    add_executable(cumes_landreman_evaluate
+                   examples/cumes_landreman_evaluate.cpp)
+    target_link_libraries(cumes_landreman_evaluate PRIVATE
+                          meow::cumes_targets)
+    meow_enable_warnings(cumes_landreman_evaluate)
 endif()
 
 if(MEOW_BUILD_TESTS)
