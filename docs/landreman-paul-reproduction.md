@@ -96,6 +96,12 @@ cuMES solver API.
 Each numbered implementation slice is committed only after its focused tests
 pass. Full GPU regression is run before declaring the reproduction complete.
 
+The implementation executable is `cumes_landreman_optimize`. Its optimizer
+variables are absolute Fourier coefficients, matching SIMSOPT's relative-step
+definition. It persistently writes strict cuMES input JSON after accepted
+iterations, so a long run can be inspected or restarted without translating a
+diagnostic normalization document.
+
 ## Acceptance evidence
 
 - Reference evaluation reproduces the supplemental SIMSOPT totals to roundoff.

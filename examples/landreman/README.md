@@ -43,3 +43,21 @@ guess conventions; the fixed boundary coefficients are copied unchanged. The
 QH evaluation requests cuMES's retained Catmull-Rom radial transfer because
 the default B-spline transfer invalidates the 100-to-150 surface transition
 for this configuration.
+
+After configuring meow with `MEOW_BUILD_CUMES_INTEGRATION=ON`, run the final
+two-stage refinements with:
+
+```bash
+build-cumes/cumes_landreman_optimize \
+  examples/landreman/qa_start.json qa qa_optimized.json
+build-cumes/cumes_landreman_optimize \
+  examples/landreman/qh_start.json qh qh_optimized.json
+```
+
+Each run varies modes through 4 and then 5. It updates the requested output
+after every accepted optimizer iteration and also writes `.mode4.json` and
+`.mode5.json` snapshots. All files use cuMES's strict, read-back-compatible
+input schema. The optional fourth argument caps function evaluations per
+stage; omit it for the meow default. Numerical Jacobians require 81 equilibrium
+solves at mode 4 and 121 at mode 5 before the first optimizer step, so these
+are intentionally long GPU runs.
