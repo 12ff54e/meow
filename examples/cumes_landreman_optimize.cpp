@@ -78,13 +78,29 @@ class LandremanResidual {
         cumes::SolveOutcome solved = solver_.solve(validated.value(), request);
         ++evaluation_count_;
         if (!solved.converged || !solved.has_complete_equilibrium()) {
-            throw std::runtime_error(
-                "cuMES equilibrium failed at objective evaluation " +
-                std::to_string(evaluation_count_) + ", stage " +
-                std::to_string(solved.failed_stage) + ", residuals (" +
-                std::to_string(solved.fsqr) + ", " +
-                std::to_string(solved.fsqz) + ", " +
-                std::to_string(solved.fsql) + ")");
+            if (cached_residual_.size() == 0) {
+                throw std::runtime_error(
+                    "initial cuMES equilibrium failed at objective "
+                    "evaluation " +
+                    std::to_string(evaluation_count_) + ", stage " +
+                    std::to_string(solved.failed_stage) + ", residuals (" +
+                    std::to_string(solved.fsqr) + ", " +
+                    std::to_string(solved.fsqz) + ", " +
+                    std::to_string(solved.fsql) + ")");
+            }
+
+            // A failed off-center trust-region trial is outside the feasible
+            // equilibrium domain. Return a finite barrier residual so TRF can
+            // reject and contract the step instead of terminating the run.
+            meow::Vector rejected = meow::Vector::Zero(cached_residual_.size());
+            rejected[0] = 100.0 * (1.0 + cached_residual_.norm());
+            std::cout << "evaluation=" << evaluation_count_
+                      << " rejected_equilibrium=1 failed_stage="
+                      << solved.failed_stage << " fsqr=" << solved.fsqr
+                      << " fsqz=" << solved.fsqz << " fsql=" << solved.fsql
+                      << " penalty_objective=" << rejected.squaredNorm()
+                      << '\n';
+            return rejected;
         }
 
         auto spec = target_spec(solved.report.input_params.nfp);
