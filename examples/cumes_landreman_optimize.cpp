@@ -1,4 +1,5 @@
 // Reproduce the analytic construction or final refinement from Landreman-Paul.
+#include <algorithm>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -244,6 +245,11 @@ void set_stage_resolution(cumes::ProblemSpec& problem,
     if (stage.mpol == 0 || stage.ntor == 0) { return; }
     problem.mpol = stage.mpol;
     problem.ntor = stage.ntor;
+    for (cumes::StageRequest& request : problem.stages) {
+        request.max_iterations =
+            std::max(request.max_iterations,
+                     static_cast<std::size_t>(stage.minimum_niter));
+    }
     const std::size_t axis_size = static_cast<std::size_t>(stage.ntor + 1);
     problem.raxis_c.assign(axis_size, 0.0);
     problem.zaxis_s.assign(axis_size, 0.0);

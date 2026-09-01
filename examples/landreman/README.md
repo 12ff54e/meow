@@ -106,6 +106,11 @@ drivers: 3, 5, 6, 6 for QA and 3, 5, 6, 6, 6 for QH. The existing `qa` and
 `qh` case names remain the separate final-refinement policy, which removes the
 QA iota residual and applies the final edge-weight ramps.
 
+At construction resolution 6, cuMES is allowed 10,000 iterations per radial
+stage. The first QA mode-3 transition reached the previous 6,000-iteration cap
+at residuals `(1.72e-12, 8.44e-13, 1.64e-12)`, just above the unchanged
+`1e-12` convergence gate. This is only a work-allowance adaptation.
+
 Construction checkpoints are named
 `.construction.modeM.json`, and archived equilibria use
 `construction-modeM_step_NNNN-equilibrium.bin`. This keeps construction mode

@@ -13,10 +13,12 @@ int main() {
     const auto qa_stages = landreman_stages(qa_construction);
     check(qa_stages.size() == 4, "QA construction has four mode stages");
     check(qa_stages.front().max_mode == 1 && qa_stages.front().mpol == 3 &&
-              qa_stages.front().ntor == 3,
+              qa_stages.front().ntor == 3 &&
+              qa_stages.front().minimum_niter == 6000,
           "QA construction starts at mode 1 and transform resolution 3");
-    check(qa_stages.back().max_mode == 4 && qa_stages.back().mpol == 6,
-          "QA construction ends at mode 4 and transform resolution 6");
+    check(qa_stages.back().max_mode == 4 && qa_stages.back().mpol == 6 &&
+              qa_stages.back().minimum_niter == 10000,
+          "QA construction ends at mode 4 with the qualified solve cap");
     check(landreman_targets_mean_iota(qa_construction),
           "QA construction targets mean iota");
     check(landreman_final_surface_weight(qa_construction) == 1.0,
@@ -38,6 +40,8 @@ int main() {
           "existing QA case retains mode-4/mode-5 refinement");
     check(refinement_stages.front().mpol == 0,
           "refinement retains the input equilibrium resolution");
+    check(refinement_stages.front().minimum_niter == 0,
+          "refinement retains the input iteration caps");
     check(landreman_final_surface_weight(qa_refinement) == 30.0,
           "QA refinement retains edge weight 30");
 

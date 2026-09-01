@@ -199,6 +199,10 @@ objectives 1.1764 for QA and 10.5719707933 for QH; the QA value is exactly the
 sum of its unit aspect residual and squared 0.42 iota residual to the reported
 precision. Both analytic boundaries converge through their imported
 `ns=12,25,50` equilibrium sequence at the adapted `1e-12` gate.
+Construction stages at `mpol=ntor=6` receive a 10,000-iteration work
+allowance: the first QA mode-3 transition ended its initial 6,000-iteration
+attempt at residuals `(1.72e-12,8.44e-13,1.64e-12)`, so changing the cap is
+needed without relaxing the equilibrium gate.
 
 The QH run explicitly selects the retained Catmull-Rom radial transfer. The
 default global B-spline transfer converges through `ns=100` but overshoots near
