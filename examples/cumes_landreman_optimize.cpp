@@ -135,9 +135,28 @@ class LandremanResidual {
         cumes::OutputSpec output_spec;
         output_spec.format = cumes::OutputFormat::BINARY;
         output_spec.path = path;
-        const cumes::Status status = writer->write_atomic(
-            cached_outcome_->equilibrium, cached_outcome_->report, output_spec,
-            validated.value());
+        cumes::RunReport report = cached_outcome_->report;
+        switch (validation_options_.precision) {
+            case cumes::PrecisionPolicy::VERIFY_DOUBLE:
+                report.build.scalar_type = "double";
+                report.build.precision_policy = "verify-double";
+                break;
+            case cumes::PrecisionPolicy::FAST_DOUBLE:
+                report.build.scalar_type = "double";
+                report.build.precision_policy = "fast-double";
+                break;
+            case cumes::PrecisionPolicy::MIXED_FLOAT:
+                report.build.scalar_type = "float";
+                report.build.precision_policy = "mixed-float";
+                break;
+            case cumes::PrecisionPolicy::DEBUG_DOUBLE:
+                report.build.scalar_type = "double";
+                report.build.precision_policy = "debug-double";
+                break;
+        }
+        const cumes::Status status =
+            writer->write_atomic(cached_outcome_->equilibrium, report,
+                                 output_spec, validated.value());
         if (!status.has_value()) {
             throw std::runtime_error("equilibrium output failed: " +
                                      status.error());
