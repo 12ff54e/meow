@@ -1,7 +1,10 @@
 // Reproduce the final two-stage QA/QH boundary refinement from Landreman-Paul.
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -9,6 +12,8 @@
 #include <cumes/config/json_reader.hpp>
 #include <cumes/config/json_writer.hpp>
 #include <cumes/config/validated_problem.hpp>
+#include <cumes/io/output_spec.hpp>
+#include <cumes/io/writer.hpp>
 #include <cumes/solver/equilibrium_solver.hpp>
 #include <meow/cumes/boundary_parameterization.hpp>
 #include <meow/cumes/quasisymmetry_target.hpp>
@@ -106,7 +111,37 @@ class LandremanResidual {
 
         cached_x_ = x;
         cached_residual_ = residual;
+        cached_outcome_ = std::move(solved);
         return residual;
+    }
+
+    void write_equilibrium(const meow::Vector& x, const std::string& path) {
+        static_cast<void>((*this)(x));
+        if (!cached_outcome_.has_value()) {
+            throw std::runtime_error("no equilibrium is available to write");
+        }
+
+        cumes::ProblemSpec problem = boundary_.apply(baseline_, x);
+        cumes::ValidationResult validated =
+            cumes::validate(std::move(problem), validation_options_);
+        if (!validated.has_value()) {
+            throw std::runtime_error(first_error(
+                validated.error(), "equilibrium output validation failed"));
+        }
+        auto writer = cumes::make_binary_writer();
+        if (!writer) {
+            throw std::runtime_error("cuMES binary writer is unavailable");
+        }
+        cumes::OutputSpec output_spec;
+        output_spec.format = cumes::OutputFormat::BINARY;
+        output_spec.path = path;
+        const cumes::Status status = writer->write_atomic(
+            cached_outcome_->equilibrium, cached_outcome_->report, output_spec,
+            validated.value());
+        if (!status.has_value()) {
+            throw std::runtime_error("equilibrium output failed: " +
+                                     status.error());
+        }
     }
 
    private:
@@ -133,22 +168,35 @@ class LandremanResidual {
     std::size_t evaluation_count_ = 0;
     std::optional<meow::Vector> cached_x_;
     meow::Vector cached_residual_;
+    std::optional<cumes::SolveOutcome> cached_outcome_;
 };
+
+std::string step_stem(const std::string& directory,
+                      int max_mode,
+                      std::size_t iteration) {
+    std::ostringstream name;
+    name << "mode" << max_mode << "_step_" << std::setw(4) << std::setfill('0')
+         << iteration;
+    return (std::filesystem::path(directory) / name.str()).string();
+}
 
 void print_usage() {
     std::cerr
         << "usage: cumes_landreman_optimize INPUT.json qa|qh OUTPUT.json "
-           "[MAX_FUNCTION_EVALUATIONS_PER_STAGE [FIRST_MODE [LAST_MODE]]]\n"
+           "[MAX_FUNCTION_EVALUATIONS_PER_STAGE [FIRST_MODE [LAST_MODE "
+           "[MAX_ACCEPTED_ITERATIONS [ITERATION_DIRECTORY]]]]]\n"
         << "The archived final refinement is run first through boundary mode "
            "4, then through mode 5. Zero or an omitted evaluation limit uses "
            "meow's 100*n default. FIRST_MODE/LAST_MODE can select 4 or 5 for "
-           "a checkpointed partial run.\n";
+           "a checkpointed partial run. ITERATION_DIRECTORY stores the "
+           "input and native equilibrium for step 0 and every accepted "
+           "iteration.\n";
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 4 || argc > 7) {
+    if (argc < 4 || argc > 9) {
         print_usage();
         return 2;
     }
@@ -164,6 +212,9 @@ int main(int argc, char** argv) {
             argc >= 5 ? std::stoull(argv[4]) : 0;
         const int first_mode = argc >= 6 ? std::stoi(argv[5]) : 4;
         const int last_mode = argc >= 7 ? std::stoi(argv[6]) : 5;
+        const std::size_t max_accepted_iterations =
+            argc >= 8 ? std::stoull(argv[7]) : 0;
+        const std::string iteration_directory = argc >= 9 ? argv[8] : "";
         if (first_mode < 4 || last_mode > 5 || first_mode > last_mode) {
             throw std::invalid_argument(
                 "FIRST_MODE and LAST_MODE must select an ordered subset of "
@@ -182,6 +233,9 @@ int main(int argc, char** argv) {
         }
         cumes::ProblemSpec current = std::move(parsed.spec);
         write_problem(output_path, current, validation_options);
+        if (!iteration_directory.empty()) {
+            std::filesystem::create_directories(iteration_directory);
+        }
 
         for (int max_mode = first_mode; max_mode <= last_mode; ++max_mode) {
             cumes_meow_example::StellaratorSymmetricBoundaryParameterization
@@ -194,19 +248,46 @@ int main(int argc, char** argv) {
             options.finite_difference_step = 1.0e-5;
             options.finite_difference_absolute_step = 1.0e-9;
             options.max_function_evaluations = max_evaluations;
+            if (max_evaluations == 0 && max_accepted_iterations != 0) {
+                const std::size_t evaluations_per_iteration =
+                    2 * (boundary.size() + 2);
+                if (max_accepted_iterations >
+                    std::numeric_limits<std::size_t>::max() /
+                        evaluations_per_iteration) {
+                    throw std::overflow_error(
+                        "accepted-iteration evaluation budget overflow");
+                }
+                options.max_function_evaluations =
+                    max_accepted_iterations * evaluations_per_iteration;
+            }
             options.verbose = 1;
             options.callback = [&](const meow::Vector& x,
                                    const meow::IterationInfo& info) {
-                write_problem(output_path, boundary.apply(current, x),
-                              validation_options);
+                const cumes::ProblemSpec accepted = boundary.apply(current, x);
+                write_problem(output_path, accepted, validation_options);
+                if (!iteration_directory.empty()) {
+                    const std::string stem = step_stem(
+                        iteration_directory, max_mode, info.iteration);
+                    write_problem(stem + "-input.json", accepted,
+                                  validation_options);
+                    residual.write_equilibrium(x, stem + "-equilibrium.bin");
+                }
                 std::cout << "accepted mode=" << max_mode
                           << " iteration=" << info.iteration
                           << " objective=" << 2.0 * info.cost << '\n';
-                return true;
+                return max_accepted_iterations == 0 ||
+                       info.iteration < max_accepted_iterations;
             };
 
             std::cout << "beginning max_mode=" << max_mode
                       << " variables=" << boundary.size() << '\n';
+            if (!iteration_directory.empty()) {
+                const std::string stem =
+                    step_stem(iteration_directory, max_mode, 0);
+                write_problem(stem + "-input.json", current,
+                              validation_options);
+                residual.write_equilibrium(initial, stem + "-equilibrium.bin");
+            }
             const meow::TrfResult result =
                 meow::trf_least_squares(std::ref(residual), initial, options);
             current = boundary.apply(current, result.x);

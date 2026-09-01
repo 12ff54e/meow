@@ -66,3 +66,14 @@ Two further optional arguments select the first and last mode stage. For
 example, append `0 4 4` to run mode 4 only, then use its `.mode4.json` as the
 input to a separate run ending in `0 5 5`. This is the supported checkpointed
 workflow for scheduler time limits.
+
+The next optional argument limits accepted optimizer iterations per stage. A
+final directory argument stores `modeM_step_NNNN-input.json` and
+`modeM_step_NNNN-equilibrium.bin` for the initial state (`NNNN=0000`) and
+every accepted iteration. For example, a 100-step mode-4 QA run is:
+
+```bash
+build-cumes/cumes_landreman_optimize \
+  examples/landreman/qa_start.json qa ../opt-qa-test/latest.json \
+  0 4 4 100 ../opt-qa-test
+```
