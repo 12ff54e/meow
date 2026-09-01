@@ -225,6 +225,25 @@ aware:
 This is a predictor update only; the converged equilibrium and objective are
 still functions of the trial boundary, and no solver state is hot-restarted.
 
+The resulting fresh QA construction completed all four stages within the
+100-accepted-step limit:
+
+| max boundary mode | accepted iterations | objective | archived objective |
+| ---: | ---: | ---: | ---: |
+| 1 | 23 | `9.62215079953e-3` | `9.6408e-3` |
+| 2 | 18 | `1.40881439229e-4` | `1.5611e-4` |
+| 3 | 13 | `3.74704919717e-6` | `3.5144e-6` |
+| 4 | 7 | `4.57544450735e-7` | `2.92794425995e-7` |
+
+There was one rejected oversized mode-2 trust-region proposal and no repeated
+failed finite-difference columns.  Finite-difference equilibria remained near
+2,100--2,300 solver iterations through modes 3 and 4, instead of climbing to
+6,700 and stalling.  The final objective is within a factor 1.56 of run 021,
+which is the expected level for this independent equilibrium and least-squares
+implementation and is a material reproduction of the archived QA result.  The
+65 accepted/initial input-equilibrium pairs, four stage checkpoints, and log
+are stored in `../opt-qa-analytic-accepted-axis`.
+
 The implementation executable is `cumes_landreman_optimize`. Its optimizer
 variables are absolute Fourier coefficients, matching SIMSOPT's relative-step
 definition. It persistently writes strict cuMES input JSON after accepted
