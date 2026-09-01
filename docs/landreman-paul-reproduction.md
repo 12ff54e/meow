@@ -101,6 +101,35 @@ cuMES solver API.
 Each numbered implementation slice is committed only after its focused tests
 pass. Full GPU regression is run before declaring the reproduction complete.
 
+## Analytic-start continuation extension
+
+The first implementation covered the archived final mode-4/mode-5
+refinements. The complete construction must also expose the earlier analytic
+starting boundaries instead of referring to those refinement inputs as the
+start of the whole calculation. The extension is split into these reviewable
+steps:
+
+1. Import the two sparse analytic boundaries from runs 021 (QA) and 039 (QH),
+   using their iteration-zero `wout` files only to supply the magnetic-axis
+   predictor that VMEC otherwise initializes internally. Verify that the
+   imported boundary contains exactly the documented nonzero harmonics.
+2. Add an explicit construction workflow to `cumes_landreman_optimize` while
+   retaining the existing refinement workflow. Construction uses uniform
+   radial QS weights, includes the QA mean-iota target 0.42, and follows the
+   archived mode schedules 1--4 for QA and 1--5 for QH. Refinement continues
+   to use modes 4--5, no iota residual, and the final radial weight ramps.
+3. Apply the archived construction-stage equilibrium resolutions
+   `mpol=ntor={3,5,6,6}` for QA and `{3,5,6,6,6}` for QH. Keep every accepted
+   boundary and equilibrium distinguishable by workflow and mode so the
+   repeated mode-4 stage cannot overwrite construction output.
+4. Add focused tests for the workflow schedules and analytic harmonics, build
+   with the cuMES integration enabled, and solve each imported initial state
+   once before advertising the commands.
+
+This extension stays entirely in meow. The construction/refinement target
+policy and continuation schedule are optimizer concerns; cuMES remains an
+unchanged equilibrium solve API.
+
 The implementation executable is `cumes_landreman_optimize`. Its optimizer
 variables are absolute Fourier coefficients, matching SIMSOPT's relative-step
 definition. It persistently writes strict cuMES input JSON after accepted
