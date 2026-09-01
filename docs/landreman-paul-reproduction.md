@@ -244,6 +244,28 @@ implementation and is a material reproduction of the archived QA result.  The
 65 accepted/initial input-equilibrium pairs, four stage checkpoints, and log
 are stored in `../opt-qa-analytic-accepted-axis`.
 
+The corresponding fresh QH construction also completed all five stages within
+the 100-accepted-step limit:
+
+| max boundary mode | accepted iterations | objective | archived objective |
+| ---: | ---: | ---: | ---: |
+| 1 | 21 | `1.40503531818e-1` | approximately `1.39906e-1` |
+| 2 | 32 | `1.91355839667e-3` | approximately `2.8614e-3` |
+| 3 | 15 | `1.20166888048e-4` | approximately `1.79572e-4` |
+| 4 | 8 | `7.30668510539e-5` | approximately `4.1688e-5` |
+| 5 | 12 | `5.36939265810e-5` | `3.07486398207e-5` |
+
+Each stage stopped on the optimizer's step tolerance, after 88 accepted steps
+in total. There were two isolated rejected oversized proposals, in modes 1
+and 2, and no equilibrium failures in modes 3--5. The final aspect ratio is
+`8.00001319737` and the final mean rotational transform is
+`-1.22245005823`. The mode-1 objective agrees with archived run 039 within
+0.5%; the paths then differ across the independent equilibrium and optimizer
+implementations, with the final objective 1.746 times the archived construction
+value. The 93 accepted/initial input-equilibrium pairs, five stage checkpoints,
+latest checkpoint, and complete log are stored in
+`../opt-qh-analytic-accepted-axis`.
+
 The implementation executable is `cumes_landreman_optimize`. Its optimizer
 variables are absolute Fourier coefficients, matching SIMSOPT's relative-step
 definition. It persistently writes strict cuMES input JSON after accepted
