@@ -163,6 +163,23 @@ The corrective work is deliberately staged:
    numerical Jacobian column-by-column against run 021-scale perturbations and
    separate optimizer differences from cuMES/VMEC equilibrium differences.
 
+The corrected-step mode-1 diagnostic did reproduce the archived first accepted
+cost (`0.149506` versus approximately `0.14952`), but later stalled at
+objective `0.0526046` with 20 accepted iterations.  Its rejected trial solves
+exposed a second initialization mismatch: the optimizer was retaining the
+iteration-zero numerical magnetic-axis predictor while the optimized
+`m=0, n=1` boundary centerline moved.  The original analytic VMEC input instead
+sets `RAXIS_CC=0` and `ZAXIS_CS=0`, requesting automatic axis initialization.
+For construction only, meow must therefore rebuild the predictor before every
+equilibrium solve from the current boundary centerline,
+`raxis_c[n]=rbc(0,n)` and `zaxis_s[n]=zbs(0,n)`.  This changes only the cuMES
+cold-start guess, not the equilibrium degrees of freedom or target.  The
+refinement workflow retains its imported converged-axis predictor.
+
+The next qualification is deliberately limited to QA mode 1.  It must first
+reduce the failed-equilibrium barrier trials and track the archived boundary
+and cost trajectory more closely; only then are construction modes 2--4 run.
+
 The implementation executable is `cumes_landreman_optimize`. Its optimizer
 variables are absolute Fourier coefficients, matching SIMSOPT's relative-step
 definition. It persistently writes strict cuMES input JSON after accepted
