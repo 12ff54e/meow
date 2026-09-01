@@ -1,4 +1,4 @@
-// Reproduce the final two-stage QA/QH boundary refinement from Landreman-Paul.
+// Reproduce the analytic construction or final refinement from Landreman-Paul.
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -16,12 +16,15 @@
 #include <cumes/io/writer.hpp>
 #include <cumes/solver/equilibrium_solver.hpp>
 #include <meow/cumes/boundary_parameterization.hpp>
+#include <meow/cumes/landreman_workflow.hpp>
 #include <meow/cumes/quasisymmetry_target.hpp>
 #include <meow/trf.hpp>
 
 namespace {
 
-enum class LandremanCase { QA, QH };
+using cumes_meow_example::LandremanCase;
+using cumes_meow_example::LandremanSelection;
+using cumes_meow_example::LandremanWorkflow;
 
 std::string first_error(const cumes::ValidationReport& report,
                         const std::string& fallback) {
@@ -47,11 +50,11 @@ class LandremanResidual {
         cumes::ProblemSpec baseline,
         cumes_meow_example::StellaratorSymmetricBoundaryParameterization
             boundary,
-        LandremanCase selected_case,
+        LandremanSelection selection,
         cumes::SolverOptions validation_options)
         : baseline_(std::move(baseline)),
           boundary_(std::move(boundary)),
-          selected_case_(selected_case),
+          selection_(selection),
           validation_options_(validation_options) {}
 
     meow::Vector operator()(const meow::Vector& x) {
@@ -69,7 +72,7 @@ class LandremanResidual {
         }
 
         cumes::SolveRequest request;
-        if (selected_case_ == LandremanCase::QH) {
+        if (selection_.selected_case == LandremanCase::QH) {
             request.radial_transfer = cumes::RadialTransferPolicy::CATMULL_ROM;
         }
         cumes::SolveOutcome solved = solver_.solve(validated.value(), request);
@@ -86,13 +89,17 @@ class LandremanResidual {
 
         auto spec = target_spec(solved.report.input_params.nfp);
         const double target_aspect =
-            selected_case_ == LandremanCase::QA ? 6.0 : 8.0;
+            cumes_meow_example::landreman_target_aspect(
+                selection_.selected_case);
         const cumes_meow_example::CompositeQuasisymmetryTarget target =
-            selected_case_ == LandremanCase::QA
+            selection_.selected_case == LandremanCase::QA
                 ? cumes_meow_example::calculate_qa_target(
                       solved.equilibrium, solved.profiles,
                       solved.report.input_params, spec, target_aspect,
-                      std::nullopt)
+                      cumes_meow_example::landreman_targets_mean_iota(
+                          selection_)
+                          ? std::optional<double>(0.42)
+                          : std::nullopt)
                 : cumes_meow_example::calculate_qh_target(
                       solved.equilibrium, solved.profiles,
                       solved.report.input_params, spec, target_aspect);
@@ -168,9 +175,10 @@ class LandremanResidual {
         int nfp) const {
         cumes_meow_example::FluxSurfaceQuasisymmetryTargetSpec spec;
         spec.helicity_m = 1;
-        spec.helicity_n = selected_case_ == LandremanCase::QA ? 0 : -nfp;
+        spec.helicity_n =
+            selection_.selected_case == LandremanCase::QA ? 0 : -nfp;
         const double final_weight =
-            selected_case_ == LandremanCase::QA ? 30.0 : 2.0;
+            cumes_meow_example::landreman_final_surface_weight(selection_);
         for (int index = 0; index <= 10; ++index) {
             spec.normalized_toroidal_flux_surfaces.push_back(index / 10.0);
             spec.surface_weights.push_back(1.0 +
@@ -181,7 +189,7 @@ class LandremanResidual {
 
     cumes::ProblemSpec baseline_;
     cumes_meow_example::StellaratorSymmetricBoundaryParameterization boundary_;
-    LandremanCase selected_case_;
+    LandremanSelection selection_;
     cumes::SolverOptions validation_options_;
     cumes::EquilibriumSolver solver_;
     std::size_t evaluation_count_ = 0;
@@ -191,23 +199,60 @@ class LandremanResidual {
 };
 
 std::string step_stem(const std::string& directory,
+                      LandremanWorkflow workflow,
                       int max_mode,
                       std::size_t iteration) {
     std::ostringstream name;
+    if (workflow == LandremanWorkflow::CONSTRUCTION) {
+        name << cumes_meow_example::landreman_workflow_name(workflow) << "-";
+    }
     name << "mode" << max_mode << "_step_" << std::setw(4) << std::setfill('0')
          << iteration;
     return (std::filesystem::path(directory) / name.str()).string();
 }
 
+std::string checkpoint_path(const std::string& output_path,
+                            LandremanWorkflow workflow,
+                            int max_mode) {
+    if (workflow == LandremanWorkflow::REFINEMENT) {
+        return output_path + ".mode" + std::to_string(max_mode) + ".json";
+    }
+    return output_path + ".construction.mode" + std::to_string(max_mode) +
+           ".json";
+}
+
+void set_stage_resolution(cumes::ProblemSpec& problem,
+                          const cumes_meow_example::LandremanStage& stage,
+                          const std::vector<double>& source_raxis,
+                          const std::vector<double>& source_zaxis) {
+    if (stage.mpol == 0 || stage.ntor == 0) { return; }
+    problem.mpol = stage.mpol;
+    problem.ntor = stage.ntor;
+    const std::size_t axis_size = static_cast<std::size_t>(stage.ntor + 1);
+    problem.raxis_c.assign(axis_size, 0.0);
+    problem.zaxis_s.assign(axis_size, 0.0);
+    for (std::size_t index = 0;
+         index < axis_size && index < source_raxis.size(); ++index) {
+        problem.raxis_c[index] = source_raxis[index];
+    }
+    for (std::size_t index = 0;
+         index < axis_size && index < source_zaxis.size(); ++index) {
+        problem.zaxis_s[index] = source_zaxis[index];
+    }
+}
+
 void print_usage() {
     std::cerr
-        << "usage: cumes_landreman_optimize INPUT.json qa|qh OUTPUT.json "
+        << "usage: cumes_landreman_optimize INPUT.json "
+           "qa|qh|qa-construction|qh-construction OUTPUT.json "
            "[MAX_FUNCTION_EVALUATIONS_PER_STAGE [FIRST_MODE [LAST_MODE "
            "[MAX_ACCEPTED_ITERATIONS [ITERATION_DIRECTORY]]]]]\n"
-        << "The archived final refinement is run first through boundary mode "
-           "4, then through mode 5. Zero or an omitted evaluation limit uses "
-           "meow's 100*n default. FIRST_MODE/LAST_MODE can select 4 or 5 for "
-           "a checkpointed partial run. ITERATION_DIRECTORY stores the "
+        << "qa/qh run the archived mode-4/mode-5 final refinement. The "
+           "*-construction cases start from the analytic boundary and run "
+           "modes 1-4 (QA) or 1-5 (QH), with the QA iota target enabled. "
+           "Zero or an omitted evaluation limit uses meow's 100*n default. "
+           "FIRST_MODE/LAST_MODE select an ordered subset of the chosen "
+           "workflow. ITERATION_DIRECTORY stores the "
            "input and native equilibrium for step 0 and every accepted "
            "iteration.\n";
 }
@@ -220,24 +265,30 @@ int main(int argc, char** argv) {
         return 2;
     }
     try {
-        const std::string case_name = argv[2];
-        const LandremanCase selected_case =
-            case_name == "qa" ? LandremanCase::QA
-            : case_name == "qh"
-                ? LandremanCase::QH
-                : throw std::invalid_argument("case must be qa or qh");
+        const LandremanSelection selection =
+            cumes_meow_example::parse_landreman_selection(argv[2]);
+        const auto stages = cumes_meow_example::landreman_stages(selection);
         const std::string output_path = argv[3];
         const std::size_t max_evaluations =
             argc >= 5 ? std::stoull(argv[4]) : 0;
-        const int first_mode = argc >= 6 ? std::stoi(argv[5]) : 4;
-        const int last_mode = argc >= 7 ? std::stoi(argv[6]) : 5;
+        const int first_mode =
+            argc >= 6 ? std::stoi(argv[5]) : stages.front().max_mode;
+        const int last_mode =
+            argc >= 7 ? std::stoi(argv[6]) : stages.back().max_mode;
         const std::size_t max_accepted_iterations =
             argc >= 8 ? std::stoull(argv[7]) : 0;
         const std::string iteration_directory = argc >= 9 ? argv[8] : "";
-        if (first_mode < 4 || last_mode > 5 || first_mode > last_mode) {
+        const auto has_mode = [&](int mode) {
+            for (const auto& stage : stages) {
+                if (stage.max_mode == mode) { return true; }
+            }
+            return false;
+        };
+        if (!has_mode(first_mode) || !has_mode(last_mode) ||
+            first_mode > last_mode) {
             throw std::invalid_argument(
                 "FIRST_MODE and LAST_MODE must select an ordered subset of "
-                "{4,5}");
+                "the chosen workflow");
         }
 
         cumes::SolverOptions validation_options;
@@ -251,16 +302,21 @@ int main(int argc, char** argv) {
                 first_error(parsed.report, "input JSON mapping failed"));
         }
         cumes::ProblemSpec current = std::move(parsed.spec);
+        const std::vector<double> source_raxis = current.raxis_c;
+        const std::vector<double> source_zaxis = current.zaxis_s;
         write_problem(output_path, current, validation_options);
         if (!iteration_directory.empty()) {
             std::filesystem::create_directories(iteration_directory);
         }
 
-        for (int max_mode = first_mode; max_mode <= last_mode; ++max_mode) {
+        for (const auto& stage : stages) {
+            const int max_mode = stage.max_mode;
+            if (max_mode < first_mode || max_mode > last_mode) { continue; }
+            set_stage_resolution(current, stage, source_raxis, source_zaxis);
             cumes_meow_example::StellaratorSymmetricBoundaryParameterization
                 boundary(max_mode);
             const meow::Vector initial = boundary.values(current);
-            LandremanResidual residual(current, boundary, selected_case,
+            LandremanResidual residual(current, boundary, selection,
                                        validation_options);
 
             meow::TrfOptions options;
@@ -285,8 +341,9 @@ int main(int argc, char** argv) {
                 const cumes::ProblemSpec accepted = boundary.apply(current, x);
                 write_problem(output_path, accepted, validation_options);
                 if (!iteration_directory.empty()) {
-                    const std::string stem = step_stem(
-                        iteration_directory, max_mode, info.iteration);
+                    const std::string stem =
+                        step_stem(iteration_directory, selection.workflow,
+                                  max_mode, info.iteration);
                     write_problem(stem + "-input.json", accepted,
                                   validation_options);
                     residual.write_equilibrium(x, stem + "-equilibrium.bin");
@@ -301,8 +358,8 @@ int main(int argc, char** argv) {
             std::cout << "beginning max_mode=" << max_mode
                       << " variables=" << boundary.size() << '\n';
             if (!iteration_directory.empty()) {
-                const std::string stem =
-                    step_stem(iteration_directory, max_mode, 0);
+                const std::string stem = step_stem(
+                    iteration_directory, selection.workflow, max_mode, 0);
                 write_problem(stem + "-input.json", current,
                               validation_options);
                 residual.write_equilibrium(initial, stem + "-equilibrium.bin");
@@ -312,7 +369,7 @@ int main(int argc, char** argv) {
             current = boundary.apply(current, result.x);
             write_problem(output_path, current, validation_options);
             write_problem(
-                output_path + ".mode" + std::to_string(max_mode) + ".json",
+                checkpoint_path(output_path, selection.workflow, max_mode),
                 current, validation_options);
             std::cout << "finished max_mode=" << max_mode
                       << " status=" << result.message

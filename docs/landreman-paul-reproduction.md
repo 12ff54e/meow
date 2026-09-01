@@ -190,6 +190,16 @@ coarse-grid descent has not reached the adapted `1e-12` gate after the
 archived 600 iterations. This changes only the solver work allowance, not the
 boundary, target, or convergence threshold.
 
+The still-earlier `qa_analytic.json` and `qh_analytic.json` inputs contain the
+sparse boundaries from construction runs 021 and 039. Select
+`qa-construction` or `qh-construction` to activate their uniform QS weights,
+the archived mode-1-up continuation resolution, and (for QA only) the 0.42
+mean-iota residual. A mode-1 numerical-Jacobian smoke test gives initial cuMES
+objectives 1.1764 for QA and 10.5719707933 for QH; the QA value is exactly the
+sum of its unit aspect residual and squared 0.42 iota residual to the reported
+precision. Both analytic boundaries converge through their imported
+`ns=12,25,50` equilibrium sequence at the adapted `1e-12` gate.
+
 The QH run explicitly selects the retained Catmull-Rom radial transfer. The
 default global B-spline transfer converges through `ns=100` but overshoots near
 the LCFS during the `100 -> 150` transition, producing an invalid Jacobian.

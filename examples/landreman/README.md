@@ -89,6 +89,29 @@ build-cumes/cumes_landreman_optimize \
   examples/landreman/qh_start.json qh qh_optimized.json
 ```
 
+Run the earlier analytic construction stages with:
+
+```bash
+build-cumes/cumes_landreman_optimize \
+  examples/landreman/qa_analytic.json qa-construction qa_constructed.json
+build-cumes/cumes_landreman_optimize \
+  examples/landreman/qh_analytic.json qh-construction qh_constructed.json
+```
+
+The QA construction enables the archived mean-iota target 0.42 and continues
+through maximum boundary modes 1, 2, 3, and 4. The QH construction has no iota
+target and continues through modes 1, 2, 3, 4, and 5. Both use uniform radial
+QS weights. Their equilibrium transform resolutions follow the archived
+drivers: 3, 5, 6, 6 for QA and 3, 5, 6, 6, 6 for QH. The existing `qa` and
+`qh` case names remain the separate final-refinement policy, which removes the
+QA iota residual and applies the final edge-weight ramps.
+
+Construction checkpoints are named
+`.construction.modeM.json`, and archived equilibria use
+`construction-modeM_step_NNNN-equilibrium.bin`. This keeps construction mode
+4 distinct from the later refinement mode 4 when both workflows share an
+output directory.
+
 Each run varies modes through 4 and then 5. It updates the requested output
 after every accepted optimizer iteration and also writes `.mode4.json` and
 `.mode5.json` snapshots. All files use cuMES's strict, read-back-compatible
@@ -98,9 +121,10 @@ solves at mode 4 and 121 at mode 5 before the first optimizer step, so these
 are intentionally long GPU runs.
 
 Two further optional arguments select the first and last mode stage. For
-example, append `0 4 4` to run mode 4 only, then use its `.mode4.json` as the
-input to a separate run ending in `0 5 5`. This is the supported checkpointed
-workflow for scheduler time limits.
+example, append `0 4 4` to a refinement run to run mode 4 only, then use its
+`.mode4.json` as the input to a separate run ending in `0 5 5`. Appending
+`0 1 2` to a construction run selects its first two stages. This is the
+supported checkpointed workflow for scheduler time limits.
 
 The next optional argument limits accepted optimizer iterations per stage. A
 final directory argument stores `modeM_step_NNNN-input.json` and
