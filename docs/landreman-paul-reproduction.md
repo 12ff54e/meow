@@ -180,6 +180,26 @@ The next qualification is deliberately limited to QA mode 1.  It must first
 reduce the failed-equilibrium barrier trials and track the archived boundary
 and cost trajectory more closely; only then are construction modes 2--4 run.
 
+That qualification passed.  With the predictor refreshed, mode 1 terminated
+normally after 23 accepted iterations and 236 objective evaluations at
+objective `0.0096228845593`, compared with the archived SIMSOPT objective
+`0.0096408`.  No equilibrium-barrier trial occurred.  Representative final
+coefficients also agree closely:
+
+| coefficient | meow + cuMES | archived run 021 |
+| --- | ---: | ---: |
+| `rbc(0,1)` | 0.1031565673 | 0.1029584216 |
+| `rbc(1,-1)` | 0.0212384768 | 0.0209931493 |
+| `rbc(1,0)` | 0.1650055435 | 0.1656929553 |
+| `zbs(0,1)` | -0.1323894290 | -0.1326896627 |
+| `zbs(1,0)` | 0.2237183921 | 0.2224868566 |
+
+This recovery identifies stale cold-start axis initialization as the cause of
+the later trajectory failure.  The smaller remaining differences are
+consistent with the independent equilibrium solver and TRF implementations;
+they no longer change the mode-1 optimum materially.  Modes 2--4 can therefore
+continue from the refreshed-axis checkpoint.
+
 The implementation executable is `cumes_landreman_optimize`. Its optimizer
 variables are absolute Fourier coefficients, matching SIMSOPT's relative-step
 definition. It persistently writes strict cuMES input JSON after accepted
