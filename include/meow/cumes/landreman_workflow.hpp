@@ -52,7 +52,7 @@ inline std::vector<LandremanStage> landreman_stages(
         return {{1, 3, 3, 6000},
                 {2, 5, 5, 6000},
                 {3, 6, 6, 10000},
-                {4, 6, 6, 10000}};
+                {4, 6, 6, 30000}};
     }
     return {{1, 3, 3, 6000},
             {2, 5, 5, 6000},

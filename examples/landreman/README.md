@@ -107,9 +107,12 @@ drivers: 3, 5, 6, 6 for QA and 3, 5, 6, 6, 6 for QH. The existing `qa` and
 QA iota residual and applies the final edge-weight ramps.
 
 At construction resolution 6, cuMES is allowed 10,000 iterations per radial
-stage. The first QA mode-3 transition reached the previous 6,000-iteration cap
-at residuals `(1.72e-12, 8.44e-13, 1.64e-12)`, just above the unchanged
-`1e-12` convergence gate. This is only a work-allowance adaptation.
+stage for mode 3 and 30,000 for QA mode 4. The first QA mode-3 transition
+reached the previous 6,000-iteration cap at residuals
+`(1.72e-12, 8.44e-13, 1.64e-12)`. At mode 4, several valid finite-difference
+samples reached the 10,000-iteration cap near `7e-9`; these samples must
+converge rather than be mistaken for infeasible trial boundaries. Both changes
+are only work-allowance adaptations; the `1e-12` gate is unchanged.
 
 Construction checkpoints are named
 `.construction.modeM.json`, and archived equilibria use

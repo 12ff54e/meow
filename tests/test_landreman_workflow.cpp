@@ -17,7 +17,7 @@ int main() {
               qa_stages.front().minimum_niter == 6000,
           "QA construction starts at mode 1 and transform resolution 3");
     check(qa_stages.back().max_mode == 4 && qa_stages.back().mpol == 6 &&
-              qa_stages.back().minimum_niter == 10000,
+              qa_stages.back().minimum_niter == 30000,
           "QA construction ends at mode 4 with the qualified solve cap");
     check(landreman_targets_mean_iota(qa_construction),
           "QA construction targets mean iota");
