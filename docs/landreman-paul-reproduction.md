@@ -130,6 +130,39 @@ This extension stays entirely in meow. The construction/refinement target
 policy and continuation schedule are optimizer concerns; cuMES remains an
 unchanged equilibrium solve API.
 
+## QA construction discrepancy investigation
+
+The first cuMES-backed analytic QA run converged to objective `0.044202869362`
+with mean iota `0.284125511417`, far from run 021. The archived logs isolate a
+policy mismatch before any equilibrium-model comparison is needed:
+
+- Run 021 uses forward differences with relative step
+  `3.1622776601683794e-3` and absolute floor `1e-7`.
+- The first meow construction run incorrectly reused the final-refinement
+  values `1e-5` and `1e-9`.
+- At the axisymmetric seed, meow's `1e-9` perturbations changed mean iota only
+  at roughly `1e-17`. The numerical Jacobian therefore represented the iota
+  target as locally flat and initially optimized almost only aspect ratio.
+- The archived mode-1 solve instead reduces the least-squares cost from
+  `0.5882` to `0.0048204` in 37 objective evaluations. The incorrect meow run
+  stopped at cost `0.0228301` and mean iota about `0.284`.
+
+The corrective work is deliberately staged:
+
+1. Make finite-difference policy part of the Landreman workflow description:
+   QA construction uses run 021's `3.1622776601683794e-3` / `1e-7`, QH
+   construction uses run 039's `1e-3` / `1e-7`, and refinement retains
+   `1e-5` / `1e-9`.
+2. Re-run QA mode 1 from the analytic seed and compare its objective, iota,
+   accepted step sizes, and boundary coefficients with archived iteration 63
+   before permitting modes 2--4.
+3. Continue each higher mode only from the corrected checkpoint. Preserve the
+   first run under `opt-qa-analytic` as negative evidence rather than
+   overwriting it.
+4. If the corrected trajectory still diverges materially, compare the
+   numerical Jacobian column-by-column against run 021-scale perturbations and
+   separate optimizer differences from cuMES/VMEC equilibrium differences.
+
 The implementation executable is `cumes_landreman_optimize`. Its optimizer
 variables are absolute Fourier coefficients, matching SIMSOPT's relative-step
 definition. It persistently writes strict cuMES input JSON after accepted
