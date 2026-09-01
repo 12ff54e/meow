@@ -59,3 +59,20 @@ Algorithmically, the solver uses Coleman–Li interior scaling, an exact dense
 trust-region quadratic solve, reflected steps at the first encountered bound,
 and a constrained Cauchy-step fallback. It is intended for modest numbers of
 optimization variables; residual evaluation may be arbitrarily expensive.
+
+## Boozer symmetry-breaking diagnostic
+
+The optimizer-side postprocessor compares maximum and RMS nonsymmetric
+magnetic-field harmonics from two cuMES Boozer-v2 binary results. For QA,
+the symmetric family is `n=0`, so all `n != 0` modes contribute:
+
+```bash
+python scripts/plot_boozer_symmetry_breaking.py \
+  initial-boozer.bin final-boozer.bin \
+  --output symmetry-breaking.png
+```
+
+The plotted amplitudes are normalized by the local `B_00(s)`. The calculation
+accounts for the Boozer-v2 mixed grid through `zeta_b = zeta + nu` and its
+toroidal integration Jacobian. `--helicity H` generalizes the retained
+symmetry family to `n=H*m` for quasihelical diagnostics.

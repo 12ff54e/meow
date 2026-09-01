@@ -91,7 +91,10 @@ cuMES solver API.
 7. **Validate, then optionally postprocess.** Compare final objective
    components and boundary coefficients. Boozer transformation remains an
    optional, independent validation step and is not linked into either cuMES
-   or the target evaluator.
+   or the target evaluator. The optimizer-side
+   `scripts/plot_boozer_symmetry_breaking.py` utility reproduces the
+   supplement's maximum/RMS `B_mn`-versus-radius diagnostic from two
+   Boozer-v2 results.
 
 Each numbered implementation slice is committed only after its focused tests
 pass. Full GPU regression is run before declaring the reproduction complete.

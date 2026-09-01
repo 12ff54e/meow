@@ -115,6 +115,17 @@ if(MEOW_BUILD_TESTS)
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_vmec_namelist_converter.py)
         execute_process(
+            COMMAND ${Python3_EXECUTABLE} -c "import numpy"
+            RESULT_VARIABLE MEOW_NUMPY_RESULT
+            OUTPUT_QUIET
+            ERROR_QUIET)
+        if(MEOW_NUMPY_RESULT EQUAL 0)
+            add_test(
+                NAME boozer_symmetry_breaking_unit
+                COMMAND ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_boozer_symmetry_breaking.py)
+        endif()
+        execute_process(
             COMMAND ${Python3_EXECUTABLE} -c "import scipy"
             RESULT_VARIABLE MEOW_SCIPY_RESULT
             OUTPUT_QUIET
