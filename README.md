@@ -1,12 +1,10 @@
-# meow
+# meow — Magnetic Equilibrium Optimizer Workbench
 
-`meow` currently provides a C++20 trust-region reflective (TRF) solver for
-bound-constrained nonlinear least squares:
+The **Magnetic Equilibrium Optimizer Workbench (`meow`)** currently provides a
+C++20 trust-region reflective (TRF) solver for bound-constrained nonlinear
+least squares:
 
-\[
-  \min_x \frac{1}{2}\lVert r(x)\rVert_2^2
-  \quad\text{subject to}\quad \ell \le x \le u.
-\]
+$$\min_x \frac{1}{2}\lVert r(x)\rVert_2^2\quad\text{subject to}\quad \ell \le x \le u.$$
 
 The implementation is independent of SciPy. SciPy is used only by an optional
 CTest comparison that checks the final solutions and costs on unconstrained,
