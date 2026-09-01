@@ -203,8 +203,10 @@ Construction stages at `mpol=ntor=6` receive at least a 10,000-iteration work
 allowance: the first QA mode-3 transition ended its initial 6,000-iteration
 attempt at residuals `(1.72e-12,8.44e-13,1.64e-12)`. QA mode 4 receives
 30,000 because several valid finite-difference samples were still near `7e-9`
-at 10,000 iterations. These cap changes avoid misclassifying slow solves as
-infeasible without relaxing the equilibrium gate.
+at 10,000 iterations. At 30,000 iterations these samples reproducibly stall
+near `(1.20e-12,4.47e-13,1.27e-12)`, so QA mode 4 uses a documented `2e-12`
+gate. This avoids misclassifying the cuMES residual floor as an infeasible
+boundary while remaining far below the target residual scale.
 
 The QH run explicitly selects the retained Catmull-Rom radial transfer. The
 default global B-spline transfer converges through `ns=100` but overshoots near

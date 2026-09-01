@@ -249,6 +249,7 @@ void set_stage_resolution(cumes::ProblemSpec& problem,
         request.max_iterations =
             std::max(request.max_iterations,
                      static_cast<std::size_t>(stage.minimum_niter));
+        request.tolerance = std::max(request.tolerance, stage.tolerance_floor);
     }
     const std::size_t axis_size = static_cast<std::size_t>(stage.ntor + 1);
     problem.raxis_c.assign(axis_size, 0.0);

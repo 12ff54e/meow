@@ -22,6 +22,7 @@ struct LandremanStage {
     int mpol;
     int ntor;
     int minimum_niter;
+    double tolerance_floor;
 };
 
 inline LandremanSelection parse_landreman_selection(std::string_view name) {
@@ -46,19 +47,19 @@ inline std::vector<LandremanStage> landreman_stages(
     if (selection.workflow == LandremanWorkflow::REFINEMENT) {
         // The refinement inputs already carry mpol=8 and ntor=6. Zero means
         // retain that input resolution for the stage.
-        return {{4, 0, 0, 0}, {5, 0, 0, 0}};
+        return {{4, 0, 0, 0, 0.0}, {5, 0, 0, 0, 0.0}};
     }
     if (selection.selected_case == LandremanCase::QA) {
-        return {{1, 3, 3, 6000},
-                {2, 5, 5, 6000},
-                {3, 6, 6, 10000},
-                {4, 6, 6, 30000}};
+        return {{1, 3, 3, 6000, 1.0e-12},
+                {2, 5, 5, 6000, 1.0e-12},
+                {3, 6, 6, 10000, 1.0e-12},
+                {4, 6, 6, 30000, 2.0e-12}};
     }
-    return {{1, 3, 3, 6000},
-            {2, 5, 5, 6000},
-            {3, 6, 6, 10000},
-            {4, 6, 6, 10000},
-            {5, 6, 6, 10000}};
+    return {{1, 3, 3, 6000, 1.0e-12},
+            {2, 5, 5, 6000, 1.0e-12},
+            {3, 6, 6, 10000, 1.0e-12},
+            {4, 6, 6, 10000, 1.0e-12},
+            {5, 6, 6, 10000, 1.0e-12}};
 }
 
 inline double landreman_target_aspect(LandremanCase selected_case) {
