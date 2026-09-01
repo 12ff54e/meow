@@ -179,9 +179,14 @@ def read_wout_axis(wout_path, ntor):
         raxis = [float(value) for value in wout.variables["raxis_cc"].data]
         zaxis = [float(value) for value in wout.variables["zaxis_cs"].data]
     expected = ntor + 1
-    if len(raxis) < expected or len(zaxis) < expected:
-        raise ValueError("wout axis has fewer than ntor+1 coefficients")
-    return raxis[:expected], zaxis[:expected]
+    if not raxis or not zaxis:
+        raise ValueError("wout axis coefficient arrays must not be empty")
+    # An iteration-zero wout may have been written after a continuation driver
+    # lowered ntor below the value in the source namelist. Modes absent from
+    # that lower-resolution axis predictor are identically zero.
+    raxis = raxis[:expected] + [0.0] * max(0, expected - len(raxis))
+    zaxis = zaxis[:expected] + [0.0] * max(0, expected - len(zaxis))
+    return raxis, zaxis
 
 
 def main():

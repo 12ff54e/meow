@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from vmec_namelist_to_cumes_json import convert_text
+from vmec_namelist_to_cumes_json import convert_text, read_wout_axis
 
 
 class NamelistConverterTest(unittest.TestCase):
@@ -61,6 +61,29 @@ class NamelistConverterTest(unittest.TestCase):
   ZBS(0,0)=0
 /
 """)
+
+    def test_lower_resolution_wout_axis_is_zero_padded(self):
+        try:
+            from scipy.io import netcdf_file
+            import numpy as np
+        except ImportError:
+            self.skipTest("scipy and numpy are required for wout-axis test")
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "wout.nc"
+            with netcdf_file(path, "w") as wout:
+                wout.createDimension("axis_mode", 2)
+                raxis = wout.createVariable(
+                    "raxis_cc", "d", ("axis_mode",))
+                zaxis = wout.createVariable(
+                    "zaxis_cs", "d", ("axis_mode",))
+                raxis[:] = np.array([1.0, 0.2])
+                zaxis[:] = np.array([0.0, -0.2])
+
+            raxis, zaxis = read_wout_axis(path, ntor=3)
+            self.assertEqual(raxis, [1.0, 0.2, 0.0, 0.0])
+            self.assertEqual(zaxis, [0.0, -0.2, 0.0, 0.0])
 
 
 if __name__ == "__main__":
