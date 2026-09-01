@@ -1,10 +1,14 @@
 #include "test_support.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <numbers>
+#include <utility>
+#include <vector>
 
 #include <meow/cumes/quasisymmetry_target.hpp>
+#include <meow/cumes/quasisymmetry_target_jvp.hpp>
 
 int main() {
     using meow::test::check;
@@ -159,6 +163,113 @@ int main() {
         equilibrium, profiles, input.nfp, archived_grid);
     check(archived.residuals.size() == 11 * 63 * 64,
           "Landreman default target has 11*63*64 residuals");
+
+    auto tangent = cumes::EquilibriumTangent::zero_like(equilibrium, profiles);
+    for (int surface = 0; surface < ns; ++surface) {
+        tangent.equilibrium.families[cumes::EquilibriumSnapshot::RMNCC]
+                                    [static_cast<std::size_t>(surface)] = 0.02;
+        tangent.equilibrium.families[cumes::EquilibriumSnapshot::RMNCC]
+                                    [static_cast<std::size_t>(ns + surface)] =
+            0.03;
+        tangent.equilibrium.families[cumes::EquilibriumSnapshot::ZMNSC]
+                                    [static_cast<std::size_t>(ns + surface)] =
+            -0.01;
+    }
+    for (int surface = 0; surface < ns - 1; ++surface) {
+        for (int theta_index = 0; theta_index < ntheta; ++theta_index) {
+            const double theta = 2.0 * std::numbers::pi * theta_index / ntheta;
+            const std::size_t index =
+                static_cast<std::size_t>(surface) * ntheta + theta_index;
+            tangent.equilibrium
+                .half_fields[cumes::EquilibriumSnapshot::SQRTG][index] =
+                0.01 * std::cos(theta);
+            tangent.equilibrium
+                .half_fields[cumes::EquilibriumSnapshot::BSUPU][index] =
+                0.02 * std::sin(theta);
+            tangent.equilibrium
+                .half_fields[cumes::EquilibriumSnapshot::BSUPV][index] = -0.01;
+            tangent.equilibrium
+                .half_fields[cumes::EquilibriumSnapshot::BSUBU][index] =
+                0.03 * std::cos(2.0 * theta);
+            tangent.equilibrium
+                .half_fields[cumes::EquilibriumSnapshot::BSUBV][index] =
+                0.015 * std::sin(theta);
+        }
+    }
+    tangent.profiles.toroidal_flux_derivative.assign(ns - 1, 0.04);
+    tangent.profiles.poloidal_flux_derivative.assign(ns - 1, -0.03);
+    tangent.profiles.rotational_transform.assign(ns - 1, 0.02);
+    tangent.profiles.poloidal_covariant_field.assign(ns - 1, -0.015);
+    tangent.profiles.toroidal_covariant_field.assign(ns - 1, 0.01);
+
+    auto shifted = [&](double scale) {
+        auto shifted_equilibrium = equilibrium;
+        auto shifted_profiles = profiles;
+        for (std::size_t component = 0;
+             component < cumes::EquilibriumSnapshot::COUNT; ++component) {
+            for (std::size_t index = 0;
+                 index < shifted_equilibrium.families[component].size();
+                 ++index) {
+                shifted_equilibrium.families[component][index] +=
+                    scale * tangent.equilibrium.families[component][index];
+            }
+        }
+        for (std::size_t field = 0;
+             field < cumes::EquilibriumSnapshot::HALF_FIELD_COUNT; ++field) {
+            for (std::size_t index = 0;
+                 index < shifted_equilibrium.half_fields[field].size();
+                 ++index) {
+                shifted_equilibrium.half_fields[field][index] +=
+                    scale * tangent.equilibrium.half_fields[field][index];
+            }
+        }
+        auto shift_profile = [scale](std::vector<double>& value,
+                                     const std::vector<double>& direction) {
+            for (std::size_t index = 0; index < value.size(); ++index) {
+                value[index] += scale * direction[index];
+            }
+        };
+        shift_profile(shifted_profiles.toroidal_flux_derivative,
+                      tangent.profiles.toroidal_flux_derivative);
+        shift_profile(shifted_profiles.poloidal_flux_derivative,
+                      tangent.profiles.poloidal_flux_derivative);
+        shift_profile(shifted_profiles.rotational_transform,
+                      tangent.profiles.rotational_transform);
+        shift_profile(shifted_profiles.poloidal_covariant_field,
+                      tangent.profiles.poloidal_covariant_field);
+        shift_profile(shifted_profiles.toroidal_covariant_field,
+                      tangent.profiles.toroidal_covariant_field);
+        return std::pair{std::move(shifted_equilibrium),
+                         std::move(shifted_profiles)};
+    };
+
+    auto paper_qh_grid = paper_grid;
+    paper_qh_grid.helicity_n = 1;
+    constexpr double epsilon = 1.0e-6;
+    const auto plus = shifted(epsilon);
+    const auto minus = shifted(-epsilon);
+    const auto plus_target = cumes_meow_example::calculate_qh_target(
+        plus.first, plus.second, input, paper_qh_grid,
+        major_radius / minor_radius);
+    const auto minus_target = cumes_meow_example::calculate_qh_target(
+        minus.first, minus.second, input, paper_qh_grid,
+        major_radius / minor_radius);
+    const auto analytic_jvp = cumes_meow_example::calculate_qh_target_jvp(
+        equilibrium, profiles, tangent, input, paper_qh_grid);
+    check(analytic_jvp.size() == plus_target.residuals.size(),
+          "QH target JVP has one value per residual");
+    double max_error = 0.0;
+    double max_reference = 0.0;
+    for (std::size_t index = 0; index < analytic_jvp.size(); ++index) {
+        const double reference =
+            (plus_target.residuals[index] - minus_target.residuals[index]) /
+            (2.0 * epsilon);
+        max_error =
+            std::max(max_error, std::abs(analytic_jvp[index] - reference));
+        max_reference = std::max(max_reference, std::abs(reference));
+    }
+    check(max_error < 2.0e-8 * std::max(1.0, max_reference),
+          "QH target analytic JVP matches centered-difference oracle");
 
     return meow::test::summary();
 }
