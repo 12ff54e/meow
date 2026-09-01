@@ -23,6 +23,8 @@ int main() {
           "QA construction ends at mode 4 with the qualified solve cap");
     check(landreman_targets_mean_iota(qa_construction),
           "QA construction targets mean iota");
+    check(landreman_refreshes_axis_predictor(qa_construction),
+          "construction refreshes its cold-start axis predictor");
     check(landreman_final_surface_weight(qa_construction) == 1.0,
           "construction uses uniform surface weights");
     const auto qa_difference =
@@ -58,6 +60,8 @@ int main() {
           "refinement retains the input tolerances");
     check(landreman_final_surface_weight(qa_refinement) == 30.0,
           "QA refinement retains edge weight 30");
+    check(!landreman_refreshes_axis_predictor(qa_refinement),
+          "refinement retains its converged-axis predictor");
     const auto refinement_difference =
         landreman_finite_difference_policy(qa_refinement);
     check(refinement_difference.relative_step == 1.0e-5 &&

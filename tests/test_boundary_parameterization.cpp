@@ -38,6 +38,24 @@ int main() {
     check(applied.rbc[3].value == 0.9,
           "modes outside the active range remain fixed");
 
+    cumes::ProblemSpec predictor_problem;
+    predictor_problem.ntor = 3;
+    predictor_problem.raxis_c = {9.0};
+    predictor_problem.zaxis_s = {8.0};
+    predictor_problem.rbc = {{0, 0, 1.0},  {0, 1, 0.12}, {0, 3, -0.02},
+                             {0, -1, 7.0}, {1, 2, 6.0},  {0, 4, 5.0}};
+    predictor_problem.zbs = {{0, 0, 0.0}, {0, 2, -0.03}, {2, 1, 4.0}};
+    cumes_meow_example::refresh_axis_predictor_from_boundary_centerline(
+        predictor_problem);
+    check(predictor_problem.raxis_c ==
+              std::vector<double>({1.0, 0.12, 0.0, -0.02}),
+          "R-axis predictor follows nonnegative m=0 boundary harmonics");
+    check(predictor_problem.zaxis_s ==
+              std::vector<double>({0.0, 0.0, -0.03, 0.0}),
+          "Z-axis predictor zero-fills missing centerline harmonics");
+    check(predictor_problem.has_raxis_c && predictor_problem.has_zaxis_s,
+          "refreshed axis predictor is serialized explicitly");
+
     StellaratorSymmetricBoundaryParameterization modes5(5);
     check(modes5.size() == 120,
           "max_mode=5 has the same 120 active DOFs as SIMSOPT");

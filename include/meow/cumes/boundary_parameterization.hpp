@@ -2,6 +2,7 @@
 #ifndef MEOW_CUMES_BOUNDARY_PARAMETERIZATION_HPP_
 #define MEOW_CUMES_BOUNDARY_PARAMETERIZATION_HPP_
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
@@ -21,6 +22,32 @@ struct BoundaryDegreeOfFreedom {
     int m;
     int n;
 };
+
+// cuMES uses these arrays only to seed the cold-start interior surfaces.  The
+// analytic Landreman inputs ask VMEC to choose this predictor automatically,
+// so construction runs approximate that behavior with the current boundary
+// centerline instead of retaining a stale iteration-zero axis.
+inline void refresh_axis_predictor_from_boundary_centerline(
+    cumes::ProblemSpec& problem) {
+    const std::size_t axis_size =
+        static_cast<std::size_t>(std::max(problem.ntor, 0) + 1);
+    problem.raxis_c.assign(axis_size, 0.0);
+    problem.zaxis_s.assign(axis_size, 0.0);
+    for (const auto& harmonic : problem.rbc) {
+        if (harmonic.m == 0 && harmonic.n >= 0 && harmonic.n <= problem.ntor) {
+            problem.raxis_c[static_cast<std::size_t>(harmonic.n)] =
+                harmonic.value;
+        }
+    }
+    for (const auto& harmonic : problem.zbs) {
+        if (harmonic.m == 0 && harmonic.n >= 0 && harmonic.n <= problem.ntor) {
+            problem.zaxis_s[static_cast<std::size_t>(harmonic.n)] =
+                harmonic.value;
+        }
+    }
+    problem.has_raxis_c = true;
+    problem.has_zaxis_s = true;
+}
 
 // Matches the SIMSOPT fixed_range(mmin=0, mmax=max_mode,
 // nmin=-max_mode, nmax=max_mode) convention used in the Landreman-Paul

@@ -92,6 +92,10 @@ inline bool landreman_targets_mean_iota(LandremanSelection selection) {
            selection.selected_case == LandremanCase::QA;
 }
 
+inline bool landreman_refreshes_axis_predictor(LandremanSelection selection) {
+    return selection.workflow == LandremanWorkflow::CONSTRUCTION;
+}
+
 inline std::string_view landreman_workflow_name(LandremanWorkflow workflow) {
     return workflow == LandremanWorkflow::CONSTRUCTION ? "construction"
                                                        : "refinement";
