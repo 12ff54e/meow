@@ -1,5 +1,40 @@
 # Landreman-Paul no-well inputs
 
+`qa_analytic.json` and `qh_analytic.json` are the sparse analytic boundaries
+used at the beginning of the original construction runs 021 and 039. Their
+boundary formulas are
+
+```text
+QA: R = 1 + 0.2 cos(theta),
+    Z =     0.2 sin(theta),                         nfp = 2
+
+QH: R = 1 + 0.2 cos(theta) + 0.2 cos(4 zeta),
+    Z =     0.2 sin(theta) - 0.2 sin(4 zeta),      nfp = 4
+```
+
+Regenerate them from the calculation subtree with:
+
+```bash
+CALC="$SUPPLEMENT_ROOT/calculations/20210704-01-simsopt_new_quasisymmetry_metric"
+QA_CONSTRUCTION="$CALC/20210704-01-021_QA_multiple_surfaces_relStepScan_A6_iota0.42"
+QH_CONSTRUCTION="$CALC/20210704-01-039_QH_multiple_surfaces_relStepScan_A8"
+
+scripts/vmec_namelist_to_cumes_json.py \
+  "$QA_CONSTRUCTION/input.nfp2_QA" examples/landreman/qa_analytic.json \
+  --minimum-ftol 1e-12 --minimum-niter 6000 \
+  --wout-axis "$QA_CONSTRUCTION/abs_step_1.00e-07_rel_step_3.16e-03_forward/wout_nfp2_QA_000_000000.nc"
+
+scripts/vmec_namelist_to_cumes_json.py \
+  "$QH_CONSTRUCTION/input.nfp4_QH" examples/landreman/qh_analytic.json \
+  --minimum-ftol 1e-12 --minimum-niter 6000 \
+  --wout-axis "$QH_CONSTRUCTION/abs_step_1.00e-07_rel_step_1.00e-03_forward/wout_nfp4_QH_000_000000.nc"
+```
+
+The imported axis is a numerical initial-guess predictor, not part of the
+analytic fixed boundary. The iteration-zero `wout` files were written at
+`ntor=3`, so the importer explicitly pads their unused higher axis modes with
+zero to match the source input's `ntor=5`.
+
 `qa.json` and `qh.json` are cuMES inputs generated from the final no-magnetic-
 well configurations in the paper supplement. Set `SUPPLEMENT_ROOT` to the
 downloaded `20211102-01-precise_quasisymmetry_zenodo` directory and regenerate

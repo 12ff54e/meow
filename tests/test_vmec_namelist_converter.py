@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from pathlib import Path
+import json
 import sys
 import unittest
 
@@ -84,6 +85,34 @@ class NamelistConverterTest(unittest.TestCase):
             raxis, zaxis = read_wout_axis(path, ntor=3)
             self.assertEqual(raxis, [1.0, 0.2, 0.0, 0.0])
             self.assertEqual(zaxis, [0.0, -0.2, 0.0, 0.0])
+
+    def test_checked_in_landreman_analytic_boundaries_are_sparse(self):
+        example_directory = (Path(__file__).resolve().parents[1]
+                             / "examples" / "landreman")
+        qa = json.loads((example_directory / "qa_analytic.json").read_text())
+        qh = json.loads((example_directory / "qh_analytic.json").read_text())
+
+        self.assertEqual(qa["nfp"], 2)
+        self.assertEqual(qa["rbc"], [
+            {"m": 0, "n": 0, "value": 1.0},
+            {"m": 1, "n": 0, "value": 0.2},
+        ])
+        self.assertEqual(qa["zbs"], [
+            {"m": 0, "n": 0, "value": 0.0},
+            {"m": 1, "n": 0, "value": 0.2},
+        ])
+
+        self.assertEqual(qh["nfp"], 4)
+        self.assertEqual(qh["rbc"], [
+            {"m": 0, "n": 0, "value": 1.0},
+            {"m": 1, "n": 0, "value": 0.2},
+            {"m": 0, "n": 1, "value": 0.2},
+        ])
+        self.assertEqual(qh["zbs"], [
+            {"m": 0, "n": 0, "value": 0.0},
+            {"m": 1, "n": 0, "value": 0.2},
+            {"m": 0, "n": 1, "value": 0.2},
+        ])
 
 
 if __name__ == "__main__":
