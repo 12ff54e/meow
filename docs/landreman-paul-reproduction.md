@@ -200,6 +200,31 @@ consistent with the independent equilibrium solver and TRF implementations;
 they no longer change the mode-1 optimum materially.  Modes 2--4 can therefore
 continue from the refreshed-axis checkpoint.
 
+The first higher-mode continuation showed that the boundary centerline alone
+is not a sufficiently accurate predictor indefinitely.  Mode 2 stopped at
+objective `3.43599596128e-4`, and mode 3 at `1.50742626669e-4`; by then some
+finite-difference solves required roughly 6,700 iterations or failed.  The
+centerline refresh had removed the original stale-axis error, but discarded
+the offset between the centerline and the actual axis after every accepted
+solve.
+
+The follow-up policy keeps the mode-1 correction and makes it continuation
+aware:
+
+1. Seed the first analytic construction stage from its boundary centerline.
+2. After an accepted optimizer step, extract the actual `m=0` axis from the
+   converged cuMES equilibrium and store it in the accepted problem.
+3. Evaluate every trial from that fixed accepted-axis predictor plus only the
+   trial's change in `rbc(0,n)` / `zbs(0,n)`.  Thus every column of one
+   finite-difference Jacobian uses the same accepted equilibrium reference and
+   remains deterministic.
+4. Carry the accepted axis through mode changes, padding only newly introduced
+   toroidal modes.  A resumed higher-mode construction likewise keeps the axis
+   serialized in its checkpoint.
+
+This is a predictor update only; the converged equilibrium and objective are
+still functions of the trial boundary, and no solver state is hot-restarted.
+
 The implementation executable is `cumes_landreman_optimize`. Its optimizer
 variables are absolute Fourier coefficients, matching SIMSOPT's relative-step
 definition. It persistently writes strict cuMES input JSON after accepted
