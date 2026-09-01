@@ -94,7 +94,9 @@ cuMES solver API.
    or the target evaluator. The optimizer-side
    `scripts/plot_boozer_symmetry_breaking.py` utility reproduces the
    supplement's maximum/RMS `B_mn`-versus-radius diagnostic from two
-   Boozer-v2 results.
+   Boozer-v3 results. The diagnostic applies the field-period relation
+   `alpha_b=alpha+nfp*nu`; the optimization target remains independent of this
+   post-processing transform.
 
 Each numbered implementation slice is committed only after its focused tests
 pass. Full GPU regression is run before declaring the reproduction complete.

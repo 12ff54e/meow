@@ -63,7 +63,7 @@ optimization variables; residual evaluation may be arbitrarily expensive.
 ## Boozer symmetry-breaking diagnostic
 
 The optimizer-side postprocessor compares maximum and RMS nonsymmetric
-magnetic-field harmonics from two cuMES Boozer-v2 binary results. For QA,
+magnetic-field harmonics from two cuMES Boozer-v3 binary results. For QA,
 the symmetric family is `n=0`, so all `n != 0` modes contribute:
 
 ```bash
@@ -73,6 +73,8 @@ python scripts/plot_boozer_symmetry_breaking.py \
 ```
 
 The plotted amplitudes are normalized by the local `B_00(s)`. The calculation
-accounts for the Boozer-v2 mixed grid through `zeta_b = zeta + nu` and its
-toroidal integration Jacobian. `--helicity H` generalizes the retained
-symmetry family to `n=H*m` for quasihelical diagnostics.
+accounts for the Boozer-v3 mixed grid through
+`alpha_b = alpha + nfp*nu` and its toroidal integration Jacobian. Here
+`alpha=nfp*zeta` is the field-period angle and `nu` is stored in physical
+toroidal radians. `--helicity H` generalizes the retained symmetry family to
+`n=H*m` for quasihelical diagnostics.

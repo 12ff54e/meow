@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare symmetry-breaking |B_mn| profiles from Boozer-v2 results."""
+"""Compare symmetry-breaking |B_mn| profiles from Boozer-v3 results."""
 
 import argparse
 from dataclasses import dataclass
@@ -9,19 +9,32 @@ import struct
 import numpy as np
 
 
-MAGIC = b"MCBOOZ02"
-VERSION = 2
+MAGIC = b"MCBOOZ03"
+VERSION = 3
 PERIOD = 2.0 * np.pi
 FAMILY_NAMES = (
     "rmncc", "rmnss", "zmnsc", "zmncs", "numnsc", "numncs",
+)
+COORDINATE_CONVENTION = (
+    "mixed-grid-v2: theta_b uniform; alpha=nfp*zeta is the unchanged source "
+    "field-period angle; alpha_b=alpha+nfp*nu; nu is in physical toroidal "
+    "radians"
+)
+FOURIER_CONVENTION = (
+    "real-parity-v3: f=sum[cc*cos(m*theta_b)*cos(n*alpha) + "
+    "ss*sin(m*theta_b)*sin(n*alpha)] for even fields and "
+    "f=sum[sc*sin(m*theta_b)*cos(n*alpha) + "
+    "cs*cos(m*theta_b)*sin(n*alpha)] for odd fields; m,n are nonnegative "
+    "and alpha is a field-period angle"
 )
 
 
 @dataclass(frozen=True)
 class BoozerField:
-    """The Boozer-v2 arrays required for a |B| spectrum."""
+    """The Boozer-v3 arrays required for a |B| spectrum."""
 
     source_ns: int
+    nfp: int
     first_surface: int
     ntheta: int
     nzeta: int
@@ -76,21 +89,24 @@ class _BinaryReader:
 
 
 def load_boozer_binary(path):
-    """Load the subset of a cuMES Boozer-v2 binary needed here."""
+    """Load the subset of a cuMES Boozer-v3 binary needed here."""
     reader = _BinaryReader(path)
     try:
         if reader.read(8) != MAGIC or reader.i32() != VERSION:
             raise ValueError(f"unsupported Boozer binary format: {path}")
-        reader.string()  # coordinate convention
-        reader.string()  # Fourier convention
+        if reader.string() != COORDINATE_CONVENTION or \
+                reader.string() != FOURIER_CONVENTION:
+            raise ValueError(
+                f"unsupported Boozer coordinate convention: {path}")
         reader.string()  # source path
         header = [reader.i32() for _ in range(13)]
-        (_, source_ns, _, _, _, _, _, first_surface, ntheta, nzeta,
+        (_, source_ns, _, _, _, _, nfp, first_surface, ntheta, nzeta,
          mmax, nmax, _) = header
         reader.f64()  # resonance tolerance
         surfaces = source_ns - first_surface
         modes = (mmax + 1) * (nmax + 1)
-        if surfaces < 1 or ntheta < 4 or nzeta < 2 or mmax < 0 or nmax < 0:
+        if surfaces < 1 or nfp < 1 or ntheta < 4 or nzeta < 2 or \
+                mmax < 0 or nmax < 0:
             raise ValueError(f"invalid Boozer dimensions in {path}")
         s = reader.array("<f8", surfaces)
         reader.array("<f8", surfaces)  # iota
@@ -111,7 +127,7 @@ def load_boozer_binary(path):
     if np.any(mode_m < 0) or np.any(mode_n < 0):
         raise ValueError(f"negative stored mode number in {path}")
     return BoozerField(
-        source_ns, first_surface, ntheta, nzeta, s, mode_m, mode_n,
+        source_ns, nfp, first_surface, ntheta, nzeta, s, mode_m, mode_n,
         families["numnsc"], families["numncs"], b,
     )
 
@@ -119,15 +135,15 @@ def load_boozer_binary(path):
 def symmetry_breaking_profile(data, helicity=0):
     """Compute max and RMS |B_mn|/B_00 outside ``n = helicity*m``.
 
-    ``n`` is the field-period toroidal integer stored by Boozer-v2. The file
-    uses a grid uniform in ``theta_b`` and source ``zeta``. Since
-    ``zeta_b = zeta + nu``, integration includes
-    ``d zeta_b / d zeta = 1 + partial_zeta nu``.
+    ``n`` is the field-period toroidal integer stored by Boozer-v3. The file
+    uses a grid uniform in ``theta_b`` and source field-period angle ``alpha``.
+    Since ``alpha_b = alpha + nfp*nu``, integration includes
+    ``d alpha_b / d alpha = 1 + nfp*partial_alpha nu``.
     """
     theta = PERIOD * np.arange(data.ntheta) / data.ntheta
-    zeta = PERIOD * np.arange(data.nzeta) / data.nzeta
+    alpha = PERIOD * np.arange(data.nzeta) / data.nzeta
     mt = data.mode_m[:, None] * theta[None, :]
-    nz = data.mode_n[:, None] * zeta[None, :]
+    nz = data.mode_n[:, None] * alpha[None, :]
     cos_mt, sin_mt = np.cos(mt), np.sin(mt)
     cos_nz, sin_nz = np.cos(nz), np.sin(nz)
     nu = (
@@ -136,7 +152,7 @@ def symmetry_breaking_profile(data, helicity=0):
         + np.einsum("sm,mz,mt->szt", data.numncs, sin_nz, cos_mt,
                     optimize=True)
     )
-    dnu_dzeta = (
+    dnu_dalpha = (
         np.einsum(
             "sm,mz,mt->szt", -data.mode_n[None, :] * data.numnsc,
             sin_nz, sin_mt, optimize=True)
@@ -144,10 +160,10 @@ def symmetry_breaking_profile(data, helicity=0):
             "sm,mz,mt->szt", data.mode_n[None, :] * data.numncs,
             cos_nz, cos_mt, optimize=True)
     )
-    jacobian = 1.0 + dnu_dzeta
+    jacobian = 1.0 + data.nfp * dnu_dalpha
     if np.any(jacobian <= 0.0) or not np.all(np.isfinite(jacobian)):
-        raise ValueError("source-zeta to Boozer-zeta map is not monotone")
-    zeta_b = zeta[None, :, None] + nu
+        raise ValueError("source-alpha to Boozer-alpha map is not monotone")
+    alpha_b = alpha[None, :, None] + data.nfp * nu
     b00 = np.mean(data.b * jacobian, axis=(1, 2))
     if np.any(b00 <= 0.0) or not np.all(np.isfinite(b00)):
         raise ValueError("invalid B_00 normalization")
@@ -157,13 +173,13 @@ def symmetry_breaking_profile(data, helicity=0):
     amplitudes = []
     for m in range(mmax + 1):
         for n in range(-nmax, nmax + 1):
-            # cos(0*theta-n*zeta) duplicates the -n mode, so retain only
+            # cos(0*theta-n*alpha_b) duplicates the -n mode, so retain only
             # positive n when m=0, matching the standard Boozer mode set.
             if m == 0 and n < 0:
                 continue
             if n == helicity * m:
                 continue
-            phase = m * theta[None, None, :] - n * zeta_b
+            phase = m * theta[None, None, :] - n * alpha_b
             cosine = 2.0 * np.mean(
                 data.b * np.cos(phase) * jacobian, axis=(1, 2))
             sine = 2.0 * np.mean(
@@ -210,8 +226,8 @@ def plot_comparison(profiles, labels, output, helicity=0):
 
 def _parse_arguments():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("initial", type=Path, help="initial Boozer-v2 .bin")
-    parser.add_argument("final", type=Path, help="final Boozer-v2 .bin")
+    parser.add_argument("initial", type=Path, help="initial Boozer-v3 .bin")
+    parser.add_argument("final", type=Path, help="final Boozer-v3 .bin")
     parser.add_argument("--output", "-o", type=Path, required=True)
     parser.add_argument(
         "--helicity", type=int, default=0,

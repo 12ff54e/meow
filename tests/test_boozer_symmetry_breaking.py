@@ -39,6 +39,7 @@ def main():
     zeros = np.zeros((surfaces, mode_m.size))
     data = MODULE.BoozerField(
         source_ns=surfaces + 1,
+        nfp=4,
         first_surface=1,
         ntheta=ntheta,
         nzeta=nzeta,
@@ -54,6 +55,46 @@ def main():
     expected_rms = np.sqrt(first * first + second * second) / b00
     np.testing.assert_allclose(profile.maximum, expected_maximum, atol=1e-14)
     np.testing.assert_allclose(profile.rms, expected_rms, atol=1e-14)
+
+    # Exercise the version-3 field-period map with nonzero physical-angle nu.
+    # The manufactured B is defined in alpha_b, then sampled on uniform source
+    # alpha. Correct quadrature must recover its two nonsymmetric amplitudes.
+    ntheta = 64
+    nzeta = 128
+    nfp = 4
+    theta = MODULE.PERIOD * np.arange(ntheta) / ntheta
+    alpha = MODULE.PERIOD * np.arange(nzeta) / nzeta
+    field_period_shift = 0.2
+    alpha_b = alpha + field_period_shift * np.sin(alpha)
+    first = 0.04
+    second = 0.025
+    b00 = 1.5
+    b = (
+        b00
+        + first * np.cos(theta[None, :] - alpha_b[:, None])
+        + second * np.cos(2.0 * theta[None, :] + alpha_b[:, None])
+        + 0.1 * np.cos(theta)[None, :]
+    )[None, :, :]
+    numnsc = np.zeros((1, mode_m.size))
+    numncs = np.zeros_like(numnsc)
+    numncs[0, 3] = field_period_shift / nfp
+    mapped = MODULE.BoozerField(
+        source_ns=2,
+        nfp=nfp,
+        first_surface=1,
+        ntheta=ntheta,
+        nzeta=nzeta,
+        s=np.array([1.0]),
+        mode_m=mode_m,
+        mode_n=mode_n,
+        numnsc=numnsc,
+        numncs=numncs,
+        b=b,
+    )
+    profile = MODULE.symmetry_breaking_profile(mapped, helicity=0)
+    np.testing.assert_allclose(profile.maximum, [first / b00], atol=1e-13)
+    np.testing.assert_allclose(
+        profile.rms, [np.hypot(first, second) / b00], atol=1e-13)
     print("Boozer symmetry-breaking checks passed")
 
 
