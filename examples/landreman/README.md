@@ -106,16 +106,18 @@ drivers: 3, 5, 6, 6 for QA and 3, 5, 6, 6, 6 for QH. The existing `qa` and
 `qh` case names remain the separate final-refinement policy, which removes the
 QA iota residual and applies the final edge-weight ramps.
 
+Finite differences also belong to the workflow. QA construction uses run
+021's relative/absolute steps `3.1622776601683794e-3` / `1e-7`, and QH
+construction uses run 039's `1e-3` / `1e-7`. The final refinements retain
+their much smaller `1e-5` / `1e-9` values. Reusing the refinement values at
+the analytic axisymmetric QA seed makes the numerical iota derivative nearly
+zero and leads to the wrong local minimum.
+
 At construction resolution 6, cuMES is allowed 10,000 iterations per radial
-stage for mode 3 and 30,000 for QA mode 4. The first QA mode-3 transition
-reached the previous 6,000-iteration cap at residuals
-`(1.72e-12, 8.44e-13, 1.64e-12)`. At mode 4, several valid finite-difference
-samples reached the 10,000-iteration cap near `7e-9`; these samples must
-converge rather than be mistaken for infeasible trial boundaries. At 30,000
-iterations, several of these samples reproducibly stall near
-`(1.20e-12, 4.47e-13, 1.27e-12)`, so QA mode 4 uses a qualified `2e-12` gate.
-This remains ten orders of magnitude below the construction objective and is
-recorded in every emitted stage input.
+stage for mode 3 and 30,000 for QA mode 4. These larger caps were exposed by
+the first, incorrect-finite-difference trajectory. The corrected construction
+restores the common `1e-12` equilibrium gate; the cap provides work allowance
+without changing that gate.
 
 Construction checkpoints are named
 `.construction.modeM.json`, and archived equilibria use

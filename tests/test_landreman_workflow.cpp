@@ -19,12 +19,17 @@ int main() {
           "QA construction starts at mode 1 and transform resolution 3");
     check(qa_stages.back().max_mode == 4 && qa_stages.back().mpol == 6 &&
               qa_stages.back().minimum_niter == 30000 &&
-              qa_stages.back().tolerance_floor == 2.0e-12,
+              qa_stages.back().tolerance_floor == 1.0e-12,
           "QA construction ends at mode 4 with the qualified solve cap");
     check(landreman_targets_mean_iota(qa_construction),
           "QA construction targets mean iota");
     check(landreman_final_surface_weight(qa_construction) == 1.0,
           "construction uses uniform surface weights");
+    const auto qa_difference =
+        landreman_finite_difference_policy(qa_construction);
+    check(qa_difference.relative_step == 3.1622776601683794e-3 &&
+              qa_difference.absolute_step == 1.0e-7,
+          "QA construction uses run-021 finite differences");
 
     const LandremanSelection qh_construction =
         parse_landreman_selection("qh-construction");
@@ -33,6 +38,11 @@ int main() {
           "QH construction continues through mode 5");
     check(!landreman_targets_mean_iota(qh_construction),
           "QH construction omits mean iota target");
+    const auto qh_difference =
+        landreman_finite_difference_policy(qh_construction);
+    check(qh_difference.relative_step == 1.0e-3 &&
+              qh_difference.absolute_step == 1.0e-7,
+          "QH construction uses run-039 finite differences");
 
     const LandremanSelection qa_refinement = parse_landreman_selection("qa");
     const auto refinement_stages = landreman_stages(qa_refinement);
@@ -48,6 +58,11 @@ int main() {
           "refinement retains the input tolerances");
     check(landreman_final_surface_weight(qa_refinement) == 30.0,
           "QA refinement retains edge weight 30");
+    const auto refinement_difference =
+        landreman_finite_difference_policy(qa_refinement);
+    check(refinement_difference.relative_step == 1.0e-5 &&
+              refinement_difference.absolute_step == 1.0e-9,
+          "refinement retains its smaller finite differences");
 
     bool rejected = false;
     try {

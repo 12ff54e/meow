@@ -343,8 +343,12 @@ int main(int argc, char** argv) {
                                        validation_options);
 
             meow::TrfOptions options;
-            options.finite_difference_step = 1.0e-5;
-            options.finite_difference_absolute_step = 1.0e-9;
+            const auto finite_difference =
+                cumes_meow_example::landreman_finite_difference_policy(
+                    selection);
+            options.finite_difference_step = finite_difference.relative_step;
+            options.finite_difference_absolute_step =
+                finite_difference.absolute_step;
             options.max_function_evaluations = max_evaluations;
             if (max_evaluations == 0 && max_accepted_iterations != 0) {
                 const std::size_t evaluations_per_iteration =

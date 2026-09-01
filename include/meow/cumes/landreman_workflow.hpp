@@ -25,6 +25,11 @@ struct LandremanStage {
     double tolerance_floor;
 };
 
+struct LandremanFiniteDifferencePolicy {
+    double relative_step;
+    double absolute_step;
+};
+
 inline LandremanSelection parse_landreman_selection(std::string_view name) {
     if (name == "qa") {
         return {LandremanCase::QA, LandremanWorkflow::REFINEMENT};
@@ -53,13 +58,24 @@ inline std::vector<LandremanStage> landreman_stages(
         return {{1, 3, 3, 6000, 1.0e-12},
                 {2, 5, 5, 6000, 1.0e-12},
                 {3, 6, 6, 10000, 1.0e-12},
-                {4, 6, 6, 30000, 2.0e-12}};
+                {4, 6, 6, 30000, 1.0e-12}};
     }
     return {{1, 3, 3, 6000, 1.0e-12},
             {2, 5, 5, 6000, 1.0e-12},
             {3, 6, 6, 10000, 1.0e-12},
             {4, 6, 6, 10000, 1.0e-12},
             {5, 6, 6, 10000, 1.0e-12}};
+}
+
+inline LandremanFiniteDifferencePolicy landreman_finite_difference_policy(
+    LandremanSelection selection) {
+    if (selection.workflow == LandremanWorkflow::REFINEMENT) {
+        return {1.0e-5, 1.0e-9};
+    }
+    if (selection.selected_case == LandremanCase::QA) {
+        return {3.1622776601683794e-3, 1.0e-7};
+    }
+    return {1.0e-3, 1.0e-7};
 }
 
 inline double landreman_target_aspect(LandremanCase selected_case) {
