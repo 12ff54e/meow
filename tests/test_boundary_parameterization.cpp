@@ -56,6 +56,43 @@ int main() {
     check(predictor_problem.has_raxis_c && predictor_problem.has_zaxis_s,
           "refreshed axis predictor is serialized explicitly");
 
+    cumes::ProblemSpec trial_problem = predictor_problem;
+    trial_problem.rbc[1].value = 0.15;
+    trial_problem.zbs[1].value = -0.01;
+    predictor_problem.raxis_c = {1.01, 0.10, 0.02, 0.0};
+    predictor_problem.zaxis_s = {0.0, 0.01, -0.04, 0.0};
+    cumes_meow_example::track_axis_predictor_from_accepted_boundary(
+        trial_problem, predictor_problem);
+    check(trial_problem.raxis_c == std::vector<double>({1.01, 0.13, 0.02, 0.0}),
+          "trial predictor follows only its R-centerline displacement");
+    check(std::abs(trial_problem.zaxis_s[0]) < 1.0e-15 &&
+              std::abs(trial_problem.zaxis_s[1] - 0.01) < 1.0e-15 &&
+              std::abs(trial_problem.zaxis_s[2] + 0.02) < 1.0e-15 &&
+              std::abs(trial_problem.zaxis_s[3]) < 1.0e-15,
+          "trial predictor follows only its Z-centerline displacement");
+
+    cumes::EquilibriumSnapshot equilibrium;
+    equilibrium.ns = 2;
+    equilibrium.mnmax = 4;
+    for (auto& component : equilibrium.families) {
+        component.assign(equilibrium.family_size(), 0.0);
+    }
+    for (std::size_t mode = 0; mode < 4; ++mode) {
+        equilibrium.component(cumes::EquilibriumSnapshot::RMNCC)[mode * 2] =
+            1.0 + 0.1 * static_cast<double>(mode);
+        equilibrium.component(cumes::EquilibriumSnapshot::ZMNCS)[mode * 2] =
+            -0.2 * static_cast<double>(mode);
+    }
+    cumes_meow_example::refresh_axis_predictor_from_equilibrium(trial_problem,
+                                                                equilibrium);
+    check(trial_problem.raxis_c == std::vector<double>({1.0, 1.1, 1.2, 1.3}),
+          "accepted predictor extracts the equilibrium R axis");
+    check(std::abs(trial_problem.zaxis_s[0]) < 1.0e-15 &&
+              std::abs(trial_problem.zaxis_s[1] - 0.2) < 1.0e-15 &&
+              std::abs(trial_problem.zaxis_s[2] - 0.4) < 1.0e-15 &&
+              std::abs(trial_problem.zaxis_s[3] - 0.6) < 1.0e-15,
+          "accepted predictor converts the equilibrium Z parity sign");
+
     StellaratorSymmetricBoundaryParameterization modes5(5);
     check(modes5.size() == 120,
           "max_mode=5 has the same 120 active DOFs as SIMSOPT");

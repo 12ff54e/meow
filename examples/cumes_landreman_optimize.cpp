@@ -45,20 +45,6 @@ void write_problem(const std::string& path,
     cumes::write_problem_spec(path, validated.value().spec());
 }
 
-cumes::ProblemSpec apply_boundary(
-    const cumes::ProblemSpec& baseline,
-    const cumes_meow_example::StellaratorSymmetricBoundaryParameterization&
-        boundary,
-    const meow::Vector& x,
-    LandremanSelection selection) {
-    cumes::ProblemSpec problem = boundary.apply(baseline, x);
-    if (cumes_meow_example::landreman_refreshes_axis_predictor(selection)) {
-        cumes_meow_example::refresh_axis_predictor_from_boundary_centerline(
-            problem);
-    }
-    return problem;
-}
-
 class LandremanResidual {
    public:
     LandremanResidual(
@@ -78,8 +64,7 @@ class LandremanResidual {
             return cached_residual_;
         }
 
-        cumes::ProblemSpec problem =
-            apply_boundary(baseline_, boundary_, x, selection_);
+        cumes::ProblemSpec problem = trial_problem(x);
         cumes::ValidationResult validated =
             cumes::validate(std::move(problem), validation_options_);
         if (!validated.has_value()) {
@@ -160,8 +145,7 @@ class LandremanResidual {
             throw std::runtime_error("no equilibrium is available to write");
         }
 
-        cumes::ProblemSpec problem =
-            apply_boundary(baseline_, boundary_, x, selection_);
+        cumes::ProblemSpec problem = trial_problem(x);
         cumes::ValidationResult validated =
             cumes::validate(std::move(problem), validation_options_);
         if (!validated.has_value()) {
@@ -203,7 +187,31 @@ class LandremanResidual {
         }
     }
 
+    cumes::ProblemSpec accept(const meow::Vector& x) {
+        static_cast<void>((*this)(x));
+        if (!cached_outcome_.has_value()) {
+            throw std::runtime_error("no equilibrium is available to accept");
+        }
+        baseline_ = boundary_.apply(baseline_, x);
+        if (cumes_meow_example::landreman_refreshes_axis_predictor(
+                selection_)) {
+            cumes_meow_example::refresh_axis_predictor_from_equilibrium(
+                baseline_, cached_outcome_->equilibrium);
+        }
+        return baseline_;
+    }
+
    private:
+    cumes::ProblemSpec trial_problem(const meow::Vector& x) const {
+        cumes::ProblemSpec problem = boundary_.apply(baseline_, x);
+        if (cumes_meow_example::landreman_refreshes_axis_predictor(
+                selection_)) {
+            cumes_meow_example::track_axis_predictor_from_accepted_boundary(
+                problem, baseline_);
+        }
+        return problem;
+    }
+
     cumes_meow_example::FluxSurfaceQuasisymmetryTargetSpec target_spec(
         int nfp) const {
         cumes_meow_example::FluxSurfaceQuasisymmetryTargetSpec spec;
@@ -341,6 +349,11 @@ int main(int argc, char** argv) {
                 first_error(parsed.report, "input JSON mapping failed"));
         }
         cumes::ProblemSpec current = std::move(parsed.spec);
+        if (cumes_meow_example::landreman_refreshes_axis_predictor(selection) &&
+            first_mode == stages.front().max_mode) {
+            cumes_meow_example::refresh_axis_predictor_from_boundary_centerline(
+                current);
+        }
         write_problem(output_path, current, validation_options);
         if (!iteration_directory.empty()) {
             std::filesystem::create_directories(iteration_directory);
@@ -350,11 +363,6 @@ int main(int argc, char** argv) {
             const int max_mode = stage.max_mode;
             if (max_mode < first_mode || max_mode > last_mode) { continue; }
             set_stage_resolution(current, stage);
-            if (cumes_meow_example::landreman_refreshes_axis_predictor(
-                    selection)) {
-                cumes_meow_example::
-                    refresh_axis_predictor_from_boundary_centerline(current);
-            }
             cumes_meow_example::StellaratorSymmetricBoundaryParameterization
                 boundary(max_mode);
             const meow::Vector initial = boundary.values(current);
@@ -384,14 +392,13 @@ int main(int argc, char** argv) {
             options.verbose = 1;
             options.callback = [&](const meow::Vector& x,
                                    const meow::IterationInfo& info) {
-                const cumes::ProblemSpec accepted =
-                    apply_boundary(current, boundary, x, selection);
-                write_problem(output_path, accepted, validation_options);
+                current = residual.accept(x);
+                write_problem(output_path, current, validation_options);
                 if (!iteration_directory.empty()) {
                     const std::string stem =
                         step_stem(iteration_directory, selection.workflow,
                                   max_mode, info.iteration);
-                    write_problem(stem + "-input.json", accepted,
+                    write_problem(stem + "-input.json", current,
                                   validation_options);
                     residual.write_equilibrium(x, stem + "-equilibrium.bin");
                 }
@@ -413,7 +420,7 @@ int main(int argc, char** argv) {
             }
             const meow::TrfResult result =
                 meow::trf_least_squares(std::ref(residual), initial, options);
-            current = apply_boundary(current, boundary, result.x, selection);
+            current = residual.accept(result.x);
             write_problem(output_path, current, validation_options);
             write_problem(
                 checkpoint_path(output_path, selection.workflow, max_mode),

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include <cumes/config/problem_spec.hpp>
+#include <cumes/io/equilibrium_snapshot.hpp>
 #include <meow/trf.hpp>
 
 namespace cumes_meow_example {
@@ -23,6 +24,20 @@ struct BoundaryDegreeOfFreedom {
     int n;
 };
 
+inline std::vector<double> boundary_centerline_coefficients(
+    const std::vector<cumes::BoundaryHarmonic>& harmonics,
+    int ntor) {
+    const std::size_t axis_size =
+        static_cast<std::size_t>(std::max(ntor, 0) + 1);
+    std::vector<double> coefficients(axis_size, 0.0);
+    for (const auto& harmonic : harmonics) {
+        if (harmonic.m == 0 && harmonic.n >= 0 && harmonic.n <= ntor) {
+            coefficients[static_cast<std::size_t>(harmonic.n)] = harmonic.value;
+        }
+    }
+    return coefficients;
+}
+
 // cuMES uses these arrays only to seed the cold-start interior surfaces.  The
 // analytic Landreman inputs ask VMEC to choose this predictor automatically,
 // so construction runs approximate that behavior with the current boundary
@@ -31,19 +46,65 @@ inline void refresh_axis_predictor_from_boundary_centerline(
     cumes::ProblemSpec& problem) {
     const std::size_t axis_size =
         static_cast<std::size_t>(std::max(problem.ntor, 0) + 1);
+    problem.raxis_c =
+        boundary_centerline_coefficients(problem.rbc, problem.ntor);
+    problem.zaxis_s =
+        boundary_centerline_coefficients(problem.zbs, problem.ntor);
+    problem.raxis_c.resize(axis_size);
+    problem.zaxis_s.resize(axis_size);
+    problem.has_raxis_c = true;
+    problem.has_zaxis_s = true;
+}
+
+// Keep all trials in one numerical-Jacobian evaluation tied to the same
+// accepted equilibrium axis, while following the trial's centerline change.
+inline void track_axis_predictor_from_accepted_boundary(
+    cumes::ProblemSpec& problem,
+    const cumes::ProblemSpec& accepted) {
+    const std::size_t axis_size =
+        static_cast<std::size_t>(std::max(problem.ntor, 0) + 1);
+    const std::vector<double> trial_r =
+        boundary_centerline_coefficients(problem.rbc, problem.ntor);
+    const std::vector<double> trial_z =
+        boundary_centerline_coefficients(problem.zbs, problem.ntor);
+    const std::vector<double> accepted_r =
+        boundary_centerline_coefficients(accepted.rbc, problem.ntor);
+    const std::vector<double> accepted_z =
+        boundary_centerline_coefficients(accepted.zbs, problem.ntor);
+    problem.raxis_c = accepted.raxis_c;
+    problem.zaxis_s = accepted.zaxis_s;
+    problem.raxis_c.resize(axis_size, 0.0);
+    problem.zaxis_s.resize(axis_size, 0.0);
+    for (std::size_t index = 0; index < axis_size; ++index) {
+        problem.raxis_c[index] += trial_r[index] - accepted_r[index];
+        problem.zaxis_s[index] += trial_z[index] - accepted_z[index];
+    }
+    problem.has_raxis_c = true;
+    problem.has_zaxis_s = true;
+}
+
+inline void refresh_axis_predictor_from_equilibrium(
+    cumes::ProblemSpec& problem,
+    const cumes::EquilibriumSnapshot& equilibrium) {
+    const std::size_t axis_size =
+        static_cast<std::size_t>(std::max(problem.ntor, 0) + 1);
+    if (equilibrium.ns <= 0 ||
+        equilibrium.mnmax < static_cast<int>(axis_size) ||
+        equilibrium.component(cumes::EquilibriumSnapshot::RMNCC).size() !=
+            equilibrium.family_size() ||
+        equilibrium.component(cumes::EquilibriumSnapshot::ZMNCS).size() !=
+            equilibrium.family_size()) {
+        throw std::invalid_argument(
+            "complete equilibrium state is required for the axis predictor");
+    }
     problem.raxis_c.assign(axis_size, 0.0);
     problem.zaxis_s.assign(axis_size, 0.0);
-    for (const auto& harmonic : problem.rbc) {
-        if (harmonic.m == 0 && harmonic.n >= 0 && harmonic.n <= problem.ntor) {
-            problem.raxis_c[static_cast<std::size_t>(harmonic.n)] =
-                harmonic.value;
-        }
-    }
-    for (const auto& harmonic : problem.zbs) {
-        if (harmonic.m == 0 && harmonic.n >= 0 && harmonic.n <= problem.ntor) {
-            problem.zaxis_s[static_cast<std::size_t>(harmonic.n)] =
-                harmonic.value;
-        }
+    const std::size_t ns = static_cast<std::size_t>(equilibrium.ns);
+    for (std::size_t mode = 0; mode < axis_size; ++mode) {
+        problem.raxis_c[mode] =
+            equilibrium.component(cumes::EquilibriumSnapshot::RMNCC)[mode * ns];
+        problem.zaxis_s[mode] = -equilibrium.component(
+            cumes::EquilibriumSnapshot::ZMNCS)[mode * ns];
     }
     problem.has_raxis_c = true;
     problem.has_zaxis_s = true;
