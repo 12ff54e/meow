@@ -158,19 +158,29 @@ class LandremanResidual {
             validated.value(), cached_outcome_->equilibrium);
         meow::Matrix result(cached_residual_.size(), x.size());
         const auto spec = target_spec(cached_outcome_->report.input_params.nfp);
+        cumes::TangentLinearOptions tangent_options;
+        std::size_t total_linear_iterations = 0;
+        double worst_linear_residual = 0.0;
         for (std::size_t column = 0; column < boundary_.size(); ++column) {
             const cumes::BoundaryTangent boundary_tangent =
                 boundary_.tangent(validated.value(), column);
             const cumes::SpectralTangentSolve spectral =
-                linearization.solve_boundary_tangent(boundary_tangent);
+                linearization.solve_boundary_tangent(boundary_tangent,
+                                                     tangent_options);
             if (!spectral.converged) {
                 throw std::runtime_error(
                     "equilibrium tangent solve failed for " +
                     boundary_.name(column) + " after " +
                     std::to_string(spectral.iterations) +
-                    " iterations; residual=" +
+                    " iterations; initial_residual=" +
+                    std::to_string(spectral.initial_residual) +
+                    ", final_residual=" +
                     std::to_string(spectral.final_residual));
             }
+            total_linear_iterations +=
+                static_cast<std::size_t>(spectral.iterations);
+            worst_linear_residual =
+                std::max(worst_linear_residual, spectral.final_residual);
             const cumes::EquilibriumTangent tangent =
                 linearization.materialize_tangent(spectral.state_tangent,
                                                   cached_outcome_->equilibrium,
@@ -198,7 +208,9 @@ class LandremanResidual {
             }
         }
         std::cout << "analytic_jacobian columns=" << result.cols()
-                  << " residuals=" << result.rows() << '\n';
+                  << " residuals=" << result.rows()
+                  << " linear_iterations=" << total_linear_iterations
+                  << " worst_linear_residual=" << worst_linear_residual << '\n';
         return result;
     }
 

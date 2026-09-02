@@ -93,6 +93,21 @@ if(MEOW_BUILD_TESTS)
         add_test(NAME boundary_parameterization_unit
                  COMMAND test_boundary_parameterization)
 
+        add_executable(test_equilibrium_target_jacobian
+                       tests/test_equilibrium_target_jacobian.cpp)
+        target_include_directories(test_equilibrium_target_jacobian PRIVATE
+                                   ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+        target_compile_definitions(
+            test_equilibrium_target_jacobian
+            PRIVATE MEOW_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+        target_link_libraries(test_equilibrium_target_jacobian PRIVATE
+                              meow::cumes_targets)
+        meow_enable_warnings(test_equilibrium_target_jacobian)
+        add_test(NAME equilibrium_target_jacobian_integration
+                 COMMAND test_equilibrium_target_jacobian)
+        set_tests_properties(equilibrium_target_jacobian_integration
+                             PROPERTIES LABELS integration)
+
         add_executable(test_landreman_workflow
                        tests/test_landreman_workflow.cpp)
         target_include_directories(test_landreman_workflow PRIVATE
