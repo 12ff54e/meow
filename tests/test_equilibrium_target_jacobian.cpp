@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <functional>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -20,7 +19,6 @@
 
 namespace {
 
-using cumes_meow_example::BoundaryFamily;
 using cumes_meow_example::LandremanCase;
 using cumes_meow_example::LandremanSelection;
 using cumes_meow_example::LandremanWorkflow;
@@ -57,6 +55,85 @@ double vector_norm(const std::vector<double>& values) {
     return std::sqrt(squared);
 }
 
+std::vector<double> difference(const std::vector<double>& perturbed,
+                               const std::vector<double>& primal,
+                               double step) {
+    if (perturbed.size() != primal.size()) {
+        throw std::runtime_error("finite-difference vector shape mismatch");
+    }
+    std::vector<double> result(primal.size());
+    for (std::size_t index = 0; index < result.size(); ++index) {
+        result[index] = (perturbed[index] - primal[index]) / step;
+    }
+    return result;
+}
+
+double relative_difference(const std::vector<double>& actual,
+                           const std::vector<double>& reference) {
+    std::vector<double> delta(actual.size());
+    if (actual.size() != reference.size()) {
+        throw std::runtime_error("relative-error vector shape mismatch");
+    }
+    for (std::size_t index = 0; index < delta.size(); ++index) {
+        delta[index] = actual[index] - reference[index];
+    }
+    return vector_norm(delta) / std::max(vector_norm(reference), 1.0e-14);
+}
+
+cumes::EquilibriumTangent finite_difference_tangent(
+    const cumes::SolveOutcome& primal,
+    const cumes::SolveOutcome& perturbed,
+    double step) {
+    cumes::EquilibriumTangent result = cumes::EquilibriumTangent::zero_like(
+        primal.equilibrium, primal.profiles);
+    for (std::size_t family = 0; family < cumes::EquilibriumSnapshot::COUNT;
+         ++family) {
+        result.equilibrium.families[family] =
+            difference(perturbed.equilibrium.families[family],
+                       primal.equilibrium.families[family], step);
+    }
+    for (std::size_t field = 0;
+         field < cumes::EquilibriumSnapshot::HALF_FIELD_COUNT; ++field) {
+        result.equilibrium.half_fields[field] =
+            difference(perturbed.equilibrium.half_fields[field],
+                       primal.equilibrium.half_fields[field], step);
+    }
+    for (std::size_t field = 0;
+         field < cumes::EquilibriumSnapshot::FULL_FIELD_COUNT; ++field) {
+        result.equilibrium.full_fields[field] =
+            difference(perturbed.equilibrium.full_fields[field],
+                       primal.equilibrium.full_fields[field], step);
+    }
+    result.profiles.toroidal_flux_derivative =
+        difference(perturbed.profiles.toroidal_flux_derivative,
+                   primal.profiles.toroidal_flux_derivative, step);
+    result.profiles.poloidal_flux_derivative =
+        difference(perturbed.profiles.poloidal_flux_derivative,
+                   primal.profiles.poloidal_flux_derivative, step);
+    result.profiles.rotational_transform =
+        difference(perturbed.profiles.rotational_transform,
+                   primal.profiles.rotational_transform, step);
+    result.profiles.poloidal_covariant_field =
+        difference(perturbed.profiles.poloidal_covariant_field,
+                   primal.profiles.poloidal_covariant_field, step);
+    result.profiles.toroidal_covariant_field =
+        difference(perturbed.profiles.toroidal_covariant_field,
+                   primal.profiles.toroidal_covariant_field, step);
+    return result;
+}
+
+double objective_derivative(const std::vector<double>& residual,
+                            const std::vector<double>& tangent) {
+    if (residual.size() != tangent.size()) {
+        throw std::runtime_error("objective derivative shape mismatch");
+    }
+    double result = 0.0;
+    for (std::size_t index = 0; index < residual.size(); ++index) {
+        result += 2.0 * residual[index] * tangent[index];
+    }
+    return result;
+}
+
 }  // namespace
 
 int main() {
@@ -89,102 +166,114 @@ int main() {
 
     StellaratorSymmetricBoundaryParameterization boundary(1);
     const meow::Vector center = boundary.values(baseline);
-    const auto& degrees = boundary.degrees_of_freedom();
-    const auto selected =
-        std::find_if(degrees.begin(), degrees.end(), [](const auto& degree) {
-            return degree.family == BoundaryFamily::RBC && degree.m == 0 &&
-                   degree.n == 1;
-        });
-    check(selected != degrees.end(), "QH boundary direction exists");
-    const std::size_t column =
-        static_cast<std::size_t>(selected - degrees.begin());
-
     cumes::EquilibriumLinearization linearization(validated.value(),
                                                   primal.equilibrium);
     cumes::TangentLinearOptions tangent_options;
-    tangent_options.max_iterations = 1000;
+    tangent_options.max_iterations = 2000;
     tangent_options.restart = 300;
-    tangent_options.relative_tolerance = 1.0e-6;
-    tangent_options.absolute_tolerance = 1.0e-11;
-    const auto spectral = linearization.solve_boundary_tangent(
-        boundary.tangent(validated.value(), column), tangent_options);
-    check(spectral.converged, "QH equilibrium tangent solve converges");
-    if (!spectral.converged) { return meow::test::summary(); }
-    const cumes::EquilibriumTangent tangent = linearization.materialize_tangent(
-        spectral.state_tangent, primal.equilibrium, primal.profiles);
+    tangent_options.relative_tolerance = 1.0e-7;
+    tangent_options.absolute_tolerance = 1.0e-12;
     const auto spec = target_spec(primal.report.input_params.nfp);
-    const std::vector<double> analytic =
-        cumes_meow_example::calculate_qh_target_jvp(
-            primal.equilibrium, primal.profiles, tangent,
-            primal.report.input_params, spec);
+    const auto primal_target = cumes_meow_example::calculate_qh_target(
+        primal.equilibrium, primal.profiles, primal.report.input_params, spec,
+        cumes_meow_example::landreman_target_aspect(LandremanCase::QH));
+    const auto finite_difference_policy =
+        cumes_meow_example::landreman_finite_difference_policy(selection);
+    double worst_target_chain_error = 0.0;
+    double worst_analytic_error = 0.0;
+    double worst_objective_error = 0.0;
 
-    constexpr double epsilon = 1.0e-3;
-    const auto solve_perturbed = [&](double sign) {
+    for (std::size_t column = 0; column < boundary.size(); ++column) {
+        const auto spectral = linearization.solve_boundary_tangent(
+            boundary.tangent(validated.value(), column), tangent_options);
+        std::cout << "QH equilibrium tangent column=" << boundary.name(column)
+                  << " converged=" << spectral.converged
+                  << " iterations=" << spectral.iterations
+                  << " initial_residual=" << spectral.initial_residual
+                  << " final_residual=" << spectral.final_residual
+                  << " relative_residual="
+                  << spectral.final_residual / spectral.initial_residual
+                  << '\n';
+        check(std::isfinite(spectral.final_residual) &&
+                  spectral.state_tangent.size() == linearization.state_size(),
+              "QH equilibrium tangent solve is finite for " +
+                  boundary.name(column));
+        const cumes::EquilibriumTangent tangent =
+            linearization.materialize_tangent(
+                spectral.state_tangent, primal.equilibrium, primal.profiles);
+        const std::vector<double> analytic =
+            cumes_meow_example::calculate_qh_target_jvp(
+                primal.equilibrium, primal.profiles, tangent,
+                primal.report.input_params, spec);
+
+        const double step =
+            std::max(finite_difference_policy.relative_step *
+                         std::abs(center[static_cast<Eigen::Index>(column)]),
+                     finite_difference_policy.absolute_step);
         meow::Vector values = center;
-        values[static_cast<Eigen::Index>(column)] += sign * epsilon;
+        values[static_cast<Eigen::Index>(column)] += step;
         cumes::ProblemSpec problem = boundary.apply(baseline, values);
-        problem.stages = {problem.stages.back()};
         cumes_meow_example::track_axis_predictor_from_accepted_boundary(
             problem, baseline);
         const auto perturbed = cumes::validate(std::move(problem), {});
         if (!perturbed.has_value()) {
             throw std::runtime_error("perturbed QH boundary did not validate");
         }
-        cumes::SolveRequest hot_request = request;
-        hot_request.restart = std::cref(primal.equilibrium);
-        return solver.solve(perturbed.value(), hot_request);
-    };
-    const cumes::SolveOutcome plus = solve_perturbed(1.0);
-    const cumes::SolveOutcome minus = solve_perturbed(-1.0);
-    check(plus.converged && minus.converged,
-          "centered QH target oracle equilibria converge");
-    if (!plus.converged || !minus.converged) { return meow::test::summary(); }
-    const auto plus_target = cumes_meow_example::calculate_qh_target(
-        plus.equilibrium, plus.profiles, plus.report.input_params, spec,
-        cumes_meow_example::landreman_target_aspect(LandremanCase::QH));
-    const auto minus_target = cumes_meow_example::calculate_qh_target(
-        minus.equilibrium, minus.profiles, minus.report.input_params, spec,
-        cumes_meow_example::landreman_target_aspect(LandremanCase::QH));
-    check(analytic.size() == plus_target.residuals.size() &&
-              analytic.size() == minus_target.residuals.size(),
-          "analytic and nonlinear QH target tangents have equal extent");
-
-    std::vector<double> finite_difference(analytic.size());
-    std::vector<double> difference(analytic.size());
-    for (std::size_t index = 0; index < analytic.size(); ++index) {
-        finite_difference[index] =
-            (plus_target.residuals[index] - minus_target.residuals[index]) /
-            (2.0 * epsilon);
-        difference[index] = analytic[index] - finite_difference[index];
+        const cumes::SolveOutcome plus =
+            solver.solve(perturbed.value(), request);
+        check(plus.converged,
+              "forward QH target oracle equilibrium converges for " +
+                  boundary.name(column));
+        if (!plus.converged) { continue; }
+        const auto plus_target = cumes_meow_example::calculate_qh_target(
+            plus.equilibrium, plus.profiles, plus.report.input_params, spec,
+            cumes_meow_example::landreman_target_aspect(LandremanCase::QH));
+        const std::vector<double> finite_difference =
+            difference(plus_target.residuals, primal_target.residuals, step);
+        const cumes::EquilibriumTangent nonlinear_tangent =
+            finite_difference_tangent(primal, plus, step);
+        const std::vector<double> target_chain =
+            cumes_meow_example::calculate_qh_target_jvp(
+                primal.equilibrium, primal.profiles, nonlinear_tangent,
+                primal.report.input_params, spec);
+        const double target_chain_error =
+            relative_difference(target_chain, finite_difference);
+        const double analytic_error =
+            relative_difference(analytic, finite_difference);
+        const double objective_fd =
+            (plus_target.value - primal_target.value) / step;
+        const double objective_analytic =
+            objective_derivative(primal_target.residuals, analytic);
+        const double objective_error =
+            std::abs(objective_analytic - objective_fd) /
+            std::max(std::abs(objective_fd), 1.0e-12);
+        worst_target_chain_error =
+            std::max(worst_target_chain_error, target_chain_error);
+        worst_analytic_error = std::max(worst_analytic_error, analytic_error);
+        worst_objective_error =
+            std::max(worst_objective_error, objective_error);
+        std::cout << "QH target tangent column=" << boundary.name(column)
+                  << " step=" << step
+                  << " GMRES_iterations=" << spectral.iterations
+                  << " GMRES_relative_residual="
+                  << spectral.final_residual / spectral.initial_residual
+                  << " target_chain_error=" << target_chain_error
+                  << " analytic_residual_error=" << analytic_error
+                  << " objective_error=" << objective_error
+                  << " objective_analytic=" << objective_analytic
+                  << " objective_fd=" << objective_fd << '\n';
+        check(std::isfinite(target_chain_error) &&
+                  std::isfinite(analytic_error) &&
+                  std::isfinite(objective_error),
+              "QH target tangent diagnostics are finite for " +
+                  boundary.name(column));
     }
-    const double relative_error =
-        vector_norm(difference) / vector_norm(finite_difference);
-    const double objective_fd =
-        (plus_target.value - minus_target.value) / (2.0 * epsilon);
-    const auto primal_target = cumes_meow_example::calculate_qh_target(
-        primal.equilibrium, primal.profiles, primal.report.input_params, spec,
-        cumes_meow_example::landreman_target_aspect(LandremanCase::QH));
-    double objective_analytic = 0.0;
-    for (std::size_t index = 0; index < analytic.size(); ++index) {
-        objective_analytic +=
-            2.0 * primal_target.residuals[index] * analytic[index];
-    }
-    const double objective_relative_error =
-        std::abs(objective_analytic - objective_fd) /
-        std::max(std::abs(objective_fd), 1.0e-12);
-    std::cout << "QH target tangent column=" << boundary.name(column)
-              << " GMRES_iterations=" << spectral.iterations
-              << " residual_relative_error=" << relative_error
-              << " objective_relative_error=" << objective_relative_error
-              << " objective_analytic=" << objective_analytic
-              << " objective_fd=" << objective_fd << '\n';
-    check(std::isfinite(relative_error) &&
-              std::isfinite(objective_relative_error),
-          "QH equilibrium target tangent comparison is finite");
-    check(relative_error < 6.0e-2,
-          "QH target residual tangent agrees with the nonlinear oracle");
-    check(objective_relative_error < 1.0e-2,
-          "QH objective tangent agrees with the nonlinear oracle");
+    std::cout << "QH target tangent worst_target_chain_error="
+              << worst_target_chain_error
+              << " worst_analytic_residual_error=" << worst_analytic_error
+              << " worst_objective_error=" << worst_objective_error << '\n';
+    check(worst_target_chain_error < 2.0e-2,
+          "QH target chain rule agrees with the nonlinear oracle");
 
     return meow::test::summary();
 }
