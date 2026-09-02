@@ -424,6 +424,13 @@ int main(int argc, char** argv) {
                 first_error(parsed.report, "input JSON mapping failed"));
         }
         cumes::ProblemSpec current = std::move(parsed.spec);
+        if (selection.workflow == LandremanWorkflow::CONSTRUCTION &&
+            selection.selected_case == LandremanCase::QA &&
+            first_mode == stages.front().max_mode &&
+            cumes_meow_example::seed_landreman_qa_construction_boundary(
+                current)) {
+            std::cout << "seeded_axisymmetric_qa_boundary amplitude=0.0001\n";
+        }
         if (cumes_meow_example::landreman_refreshes_axis_predictor(selection) &&
             first_mode == stages.front().max_mode) {
             cumes_meow_example::refresh_axis_predictor_from_boundary_centerline(

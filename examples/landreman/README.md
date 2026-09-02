@@ -106,12 +106,20 @@ drivers: 3, 5, 6, 6 for QA and 3, 5, 6, 6, 6 for QH. The existing `qa` and
 `qh` case names remain the separate final-refinement policy, which removes the
 QA iota residual and applies the final edge-weight ramps.
 
-Finite differences also belong to the workflow. QA construction uses run
-021's relative/absolute steps `3.1622776601683794e-3` / `1e-7`, and QH
-construction uses run 039's `1e-3` / `1e-7`. The final refinements retain
-their much smaller `1e-5` / `1e-9` values. Reusing the refinement values at
-the analytic axisymmetric QA seed makes the numerical iota derivative nearly
-zero and leads to the wrong local minimum.
+The optimizer now obtains its dense target Jacobian from cuMES equilibrium
+tangents: one nonlinear equilibrium is retained while one matrix-free linear
+solve is applied per boundary variable, and meow differentiates the target.
+The archived runs instead used one-sided finite differences. Their
+relative/absolute steps remain recorded in the workflow policy for comparison:
+`3.1622776601683794e-3` / `1e-7` for QA construction, `1e-3` / `1e-7` for QH
+construction, and `1e-5` / `1e-9` for the refinements.
+
+The exact analytic QA boundary is an axisymmetric stationary point: mean iota
+and QA error have zero first derivative with respect to every 3-D boundary
+mode. The archived one-sided difference supplied the symmetry-breaking
+direction implicitly. For analytic tangents, `qa-construction` explicitly
+adds a deterministic chiral seed of amplitude `1e-4` only when all active 3-D
+modes are exactly zero. Any user-supplied 3-D boundary is left unchanged.
 
 At construction resolution 6, cuMES is allowed 10,000 iterations per radial
 stage for mode 3 and 30,000 for QA mode 4. These larger caps were exposed by
@@ -129,9 +137,10 @@ Each run varies modes through 4 and then 5. It updates the requested output
 after every accepted optimizer iteration and also writes `.mode4.json` and
 `.mode5.json` snapshots. All files use cuMES's strict, read-back-compatible
 input schema. The optional fourth argument caps function evaluations per
-stage; omit it for the meow default. Numerical Jacobians require 81 equilibrium
-solves at mode 4 and 121 at mode 5 before the first optimizer step, so these
-are intentionally long GPU runs.
+stage; omit it for the meow default. An analytic mode-4/mode-5 Jacobian still
+has 80/120 columns, but those columns are linear tangent solves sharing one
+converged equilibrium and retained CUDA operator context rather than 81/121
+nonlinear equilibrium solves.
 
 Two further optional arguments select the first and last mode stage. For
 example, append `0 4 4` to a refinement run to run mode 4 only, then use its

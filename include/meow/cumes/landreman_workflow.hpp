@@ -2,10 +2,14 @@
 #ifndef MEOW_CUMES_LANDREMAN_WORKFLOW_HPP_
 #define MEOW_CUMES_LANDREMAN_WORKFLOW_HPP_
 
+#include <cmath>
+#include <cstddef>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include <meow/cumes/boundary_parameterization.hpp>
 
 namespace cumes_meow_example {
 
@@ -94,6 +98,40 @@ inline bool landreman_targets_mean_iota(LandremanSelection selection) {
 
 inline bool landreman_refreshes_axis_predictor(LandremanSelection selection) {
     return selection.workflow == LandremanWorkflow::CONSTRUCTION;
+}
+
+// The archived QA construction escaped its exactly axisymmetric stationary
+// point through a one-sided finite-difference Jacobian. An analytic Jacobian
+// instead needs an explicit 3-D seed because iota and the QA residual have no
+// first derivative there. Preserve any user-supplied 3-D boundary unchanged.
+inline bool seed_landreman_qa_construction_boundary(cumes::ProblemSpec& problem,
+                                                    double amplitude = 1.0e-4) {
+    if (!(amplitude > 0.0) || !std::isfinite(amplitude)) {
+        throw std::invalid_argument(
+            "QA construction seed amplitude must be finite and positive");
+    }
+    StellaratorSymmetricBoundaryParameterization boundary(1);
+    meow::Vector values = boundary.values(problem);
+    const auto& degrees = boundary.degrees_of_freedom();
+    for (std::size_t index = 0; index < degrees.size(); ++index) {
+        if (degrees[index].n != 0 &&
+            values[static_cast<Eigen::Index>(index)] != 0.0) {
+            return false;
+        }
+    }
+    for (std::size_t index = 0; index < degrees.size(); ++index) {
+        const auto& degree = degrees[index];
+        if (degree.n == 0) { continue; }
+        double sign = 1.0;
+        if (degree.family == BoundaryFamily::RBC) {
+            sign = degree.m == 0 || degree.n < 0 ? 1.0 : -1.0;
+        } else {
+            sign = degree.m == 0 ? -1.0 : 1.0;
+        }
+        values[static_cast<Eigen::Index>(index)] = sign * amplitude;
+    }
+    problem = boundary.apply(problem, values);
+    return true;
 }
 
 inline std::string_view landreman_workflow_name(LandremanWorkflow workflow) {

@@ -330,10 +330,10 @@ The still-earlier `qa_analytic.json` and `qh_analytic.json` inputs contain the
 sparse boundaries from construction runs 021 and 039. Select
 `qa-construction` or `qh-construction` to activate their uniform QS weights,
 the archived mode-1-up continuation resolution, and (for QA only) the 0.42
-mean-iota residual. A mode-1 numerical-Jacobian smoke test gives initial cuMES
+mean-iota residual. The archived numerical-Jacobian inputs give initial cuMES
 objectives 1.1764 for QA and 10.5719707933 for QH; the QA value is exactly the
 sum of its unit aspect residual and squared 0.42 iota residual to the reported
-precision. Both analytic boundaries converge through their imported
+precision. Both sparse boundaries converge through their imported
 `ns=12,25,50` equilibrium sequence at the adapted `1e-12` gate.
 Construction stages at `mpol=ntor=6` receive at least a 10,000-iteration work
 allowance: the first QA mode-3 transition ended its initial 6,000-iteration
@@ -348,6 +348,41 @@ default global B-spline transfer converges through `ns=100` but overshoots near
 the LCFS during the `100 -> 150` transition, producing an invalid Jacobian.
 Catmull-Rom completes both remaining stages. This is solver-path provenance,
 not part of the target definition.
+
+## Analytic equilibrium-tangent qualification
+
+The current optimizer evaluates the nonlinear equilibrium once per trial and
+assembles the dense target Jacobian from cuMES's retained final-grid
+linearization. cuMES solves
+
+```text
+F_u du = -F_x dx
+```
+
+for each optimizer-owned boundary direction; meow then applies the analytic
+QS, aspect-ratio, and mean-iota target JVPs. cuMES remains unaware of the
+target definition. At the mode-1 QH start, a strict `1e-6` tangent solve for
+`rbc(0,1)` agrees with a centered, fully re-solved nonlinear oracle to 5.2% in
+the complete residual vector and 0.14% in the invariant objective derivative.
+The production optimizer uses cuMES's `1e-4` linear tolerance, which is more
+appropriate for trust-region steps and later 120-column stages.
+
+The sparse QA start needs one additional policy. It is exactly axisymmetric,
+so transform and QA error are stationary to first order in the 3-D modes. Run
+021 escaped this manifold through its one-sided finite-difference Jacobian.
+The analytic workflow instead inserts a deterministic chiral `1e-4` seed only
+when the active 3-D coefficients are all exactly zero. With this seed, a fresh
+mode-1 run reaches objective `0.0101326414112` and mean iota
+`0.386319491437`; the archived mode-1 objective was approximately `0.0096408`.
+
+One accepted analytic step at every construction mode provides the scaling
+smoke test below. All tangent columns converged, including all 120 QH mode-5
+directions.
+
+| case | mode objectives after one accepted step per stage |
+| --- | --- |
+| QA | `1.17642 -> 0.23840 -> 0.20441 -> 0.11054 -> 0.09879` |
+| QH | `10.57197 -> 4.99554 -> 2.02934 -> 0.64177 -> 0.11575 -> 0.06746` |
 
 ## cuMES final-boundary cross-check
 

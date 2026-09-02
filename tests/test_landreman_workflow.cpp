@@ -27,6 +27,24 @@ int main() {
           "construction refreshes its cold-start axis predictor");
     check(landreman_final_surface_weight(qa_construction) == 1.0,
           "construction uses uniform surface weights");
+    cumes::ProblemSpec qa_boundary;
+    qa_boundary.rbc = {{0, 0, 1.0}, {1, 0, 0.2}};
+    qa_boundary.zbs = {{0, 0, 0.0}, {1, 0, 0.2}};
+    check(seed_landreman_qa_construction_boundary(qa_boundary),
+          "analytic QA construction seeds an axisymmetric boundary");
+    const StellaratorSymmetricBoundaryParameterization seed_modes(1);
+    const meow::Vector seeded = seed_modes.values(qa_boundary);
+    check(seeded[0] == 1.0e-4 && seeded[1] == 1.0e-4 && seeded[3] == -1.0e-4 &&
+              seeded[4] == -1.0e-4 && seeded[5] == 1.0e-4 &&
+              seeded[7] == 1.0e-4,
+          "QA construction seed has a deterministic chiral sign pattern");
+    const cumes::ProblemSpec seeded_boundary = qa_boundary;
+    check(!seed_landreman_qa_construction_boundary(qa_boundary),
+          "an existing 3-D QA boundary is not seeded again");
+    check((seed_modes.values(qa_boundary).array() ==
+           seed_modes.values(seeded_boundary).array())
+              .all(),
+          "QA construction seed preserves an existing 3-D boundary");
     const auto qa_difference =
         landreman_finite_difference_policy(qa_construction);
     check(qa_difference.relative_step == 3.1622776601683794e-3 &&
