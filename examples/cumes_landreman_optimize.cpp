@@ -86,11 +86,13 @@ class LandremanResidual {
         cumes_meow_example::StellaratorSymmetricBoundaryParameterization
             boundary,
         LandremanSelection selection,
-        cumes::SolverOptions validation_options)
+        cumes::SolverOptions validation_options,
+        const cumes::EquilibriumSnapshot* initial_restart = nullptr)
         : baseline_(std::move(baseline)),
           boundary_(std::move(boundary)),
           selection_(selection),
-          validation_options_(validation_options) {}
+          validation_options_(validation_options),
+          initial_restart_(initial_restart) {}
 
     meow::Vector operator()(const meow::Vector& x) {
         if (cached_x_.has_value() && cached_x_->size() == x.size() &&
@@ -107,12 +109,43 @@ class LandremanResidual {
         }
 
         cumes::SolveRequest request;
+        const bool used_initial_restart = initial_restart_ != nullptr;
+        if (used_initial_restart) {
+            request.restart = std::cref(*initial_restart_);
+        }
         if (selection_.selected_case == LandremanCase::QH) {
             request.radial_transfer = cumes::RadialTransferPolicy::CATMULL_ROM;
         }
-        cumes::SolveOutcome solved = solver_.solve(validated.value(), request);
+        std::optional<cumes::ValidationResult> restart_validated;
+        if (used_initial_restart) {
+            cumes::ProblemSpec restart_problem = validated.value().spec();
+            restart_problem.stages = {restart_problem.stages.back()};
+            restart_validated.emplace(cumes::validate(
+                std::move(restart_problem), validation_options_));
+            if (!restart_validated->has_value()) {
+                throw std::runtime_error(
+                    first_error(restart_validated->error(),
+                                "stage-restart boundary validation failed"));
+            }
+        }
+        cumes::SolveOutcome solved =
+            solver_.solve(used_initial_restart ? restart_validated->value()
+                                               : validated.value(),
+                          request);
+        initial_restart_ = nullptr;
         ++evaluation_count_;
         total_nonlinear_iterations_ += solved.total_iterations;
+        if (used_initial_restart &&
+            (!solved.converged || !solved.has_complete_equilibrium())) {
+            std::cout << "initial_stage_restart_failed=1 failed_stage="
+                      << solved.failed_stage << " fsqr=" << solved.fsqr
+                      << " fsqz=" << solved.fsqz << " fsql=" << solved.fsql
+                      << " cold_fallback=1\n";
+            request.restart.reset();
+            solved = solver_.solve(validated.value(), request);
+            ++evaluation_count_;
+            total_nonlinear_iterations_ += solved.total_iterations;
+        }
         if (!solved.converged || !solved.has_complete_equilibrium()) {
             if (cached_residual_.size() == 0) {
                 throw std::runtime_error(
@@ -426,6 +459,13 @@ class LandremanResidual {
         return total_linear_iterations_;
     }
 
+    const cumes::EquilibriumSnapshot& equilibrium() const {
+        if (!cached_outcome_.has_value()) {
+            throw std::runtime_error("no accepted equilibrium is available");
+        }
+        return cached_outcome_->equilibrium;
+    }
+
     void write_equilibrium(const meow::Vector& x, const std::string& path) {
         static_cast<void>((*this)(x));
         if (!cached_outcome_.has_value()) {
@@ -520,6 +560,7 @@ class LandremanResidual {
     LandremanSelection selection_;
     cumes::SolverOptions validation_options_;
     cumes::EquilibriumSolver solver_;
+    const cumes::EquilibriumSnapshot* initial_restart_ = nullptr;
     std::size_t evaluation_count_ = 0;
     std::size_t total_nonlinear_iterations_ = 0;
     std::size_t analytic_jacobian_evaluations_ = 0;
@@ -660,6 +701,7 @@ int main(int argc, char** argv) {
         if (!iteration_directory.empty()) {
             std::filesystem::create_directories(iteration_directory);
         }
+        std::optional<cumes::EquilibriumSnapshot> continuation_equilibrium;
 
         for (const auto& stage : stages) {
             const int max_mode = stage.max_mode;
@@ -668,8 +710,17 @@ int main(int argc, char** argv) {
             cumes_meow_example::StellaratorSymmetricBoundaryParameterization
                 boundary(max_mode);
             const meow::Vector initial = boundary.values(current);
+            const int stage_ns =
+                static_cast<int>(current.stages.back().radial_surfaces);
+            const int stage_mnmax = current.mpol * (current.ntor + 1);
+            const cumes::EquilibriumSnapshot* stage_restart = nullptr;
+            if (continuation_equilibrium.has_value() &&
+                continuation_equilibrium->ns == stage_ns &&
+                continuation_equilibrium->mnmax == stage_mnmax) {
+                stage_restart = &*continuation_equilibrium;
+            }
             LandremanResidual residual(current, boundary, selection,
-                                       validation_options);
+                                       validation_options, stage_restart);
 
             meow::TrfOptions options;
             const auto finite_difference =
@@ -713,7 +764,9 @@ int main(int argc, char** argv) {
 
             std::cout << "beginning max_mode=" << max_mode
                       << " variables=" << boundary.size() << " jacobian_method="
-                      << jacobian_method_name(jacobian_method) << '\n';
+                      << jacobian_method_name(jacobian_method)
+                      << " stage_restart=" << (stage_restart != nullptr)
+                      << '\n';
             if (!iteration_directory.empty()) {
                 const std::string stem = step_stem(
                     iteration_directory, selection.workflow, max_mode, 0);
@@ -740,6 +793,7 @@ int main(int argc, char** argv) {
                                                  options);
             }
             current = residual.accept(result.x);
+            continuation_equilibrium = residual.equilibrium();
             write_problem(output_path, current, validation_options);
             write_problem(
                 checkpoint_path(output_path, selection.workflow, max_mode),
