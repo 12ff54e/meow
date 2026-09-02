@@ -29,6 +29,22 @@ using cumes_meow_example::LandremanCase;
 using cumes_meow_example::LandremanSelection;
 using cumes_meow_example::LandremanWorkflow;
 
+enum class JacobianMethod { ANALYTIC, FINITE_DIFFERENCE };
+
+JacobianMethod parse_jacobian_method(const std::string& name) {
+    if (name == "analytic") { return JacobianMethod::ANALYTIC; }
+    if (name == "finite-difference") {
+        return JacobianMethod::FINITE_DIFFERENCE;
+    }
+    throw std::invalid_argument(
+        "JACOBIAN_METHOD must be analytic or finite-difference");
+}
+
+const char* jacobian_method_name(JacobianMethod method) {
+    return method == JacobianMethod::ANALYTIC ? "analytic"
+                                              : "finite-difference";
+}
+
 std::string first_error(const cumes::ValidationReport& report,
                         const std::string& fallback) {
     const auto errors = report.errors();
@@ -80,6 +96,7 @@ class LandremanResidual {
         }
         cumes::SolveOutcome solved = solver_.solve(validated.value(), request);
         ++evaluation_count_;
+        total_nonlinear_iterations_ += solved.total_iterations;
         if (!solved.converged || !solved.has_complete_equilibrium()) {
             if (cached_residual_.size() == 0) {
                 throw std::runtime_error(
@@ -211,7 +228,23 @@ class LandremanResidual {
                   << " residuals=" << result.rows()
                   << " linear_iterations=" << total_linear_iterations
                   << " worst_linear_residual=" << worst_linear_residual << '\n';
+        ++analytic_jacobian_evaluations_;
+        total_linear_iterations_ += total_linear_iterations;
         return result;
+    }
+
+    std::size_t equilibrium_evaluations() const { return evaluation_count_; }
+
+    std::size_t total_nonlinear_iterations() const {
+        return total_nonlinear_iterations_;
+    }
+
+    std::size_t analytic_jacobian_evaluations() const {
+        return analytic_jacobian_evaluations_;
+    }
+
+    std::size_t total_linear_iterations() const {
+        return total_linear_iterations_;
     }
 
     void write_equilibrium(const meow::Vector& x, const std::string& path) {
@@ -309,6 +342,9 @@ class LandremanResidual {
     cumes::SolverOptions validation_options_;
     cumes::EquilibriumSolver solver_;
     std::size_t evaluation_count_ = 0;
+    std::size_t total_nonlinear_iterations_ = 0;
+    std::size_t analytic_jacobian_evaluations_ = 0;
+    std::size_t total_linear_iterations_ = 0;
     std::optional<meow::Vector> cached_x_;
     meow::Vector cached_residual_;
     std::optional<cumes::SolveOutcome> cached_outcome_;
@@ -368,7 +404,8 @@ void print_usage() {
         << "usage: cumes_landreman_optimize INPUT.json "
            "qa|qh|qa-construction|qh-construction OUTPUT.json "
            "[MAX_FUNCTION_EVALUATIONS_PER_STAGE [FIRST_MODE [LAST_MODE "
-           "[MAX_ACCEPTED_ITERATIONS [ITERATION_DIRECTORY]]]]]\n"
+           "[MAX_ACCEPTED_ITERATIONS [ITERATION_DIRECTORY "
+           "[JACOBIAN_METHOD]]]]]]\n"
         << "qa/qh run the archived mode-4/mode-5 final refinement. The "
            "*-construction cases start from the analytic boundary and run "
            "modes 1-4 (QA) or 1-5 (QH), with the QA iota target enabled. "
@@ -376,13 +413,14 @@ void print_usage() {
            "FIRST_MODE/LAST_MODE select an ordered subset of the chosen "
            "workflow. ITERATION_DIRECTORY stores the "
            "input and native equilibrium for step 0 and every accepted "
-           "iteration.\n";
+           "iteration. JACOBIAN_METHOD is analytic (default) or "
+           "finite-difference.\n";
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 4 || argc > 9) {
+    if (argc < 4 || argc > 10) {
         print_usage();
         return 2;
     }
@@ -400,6 +438,8 @@ int main(int argc, char** argv) {
         const std::size_t max_accepted_iterations =
             argc >= 8 ? std::stoull(argv[7]) : 0;
         const std::string iteration_directory = argc >= 9 ? argv[8] : "";
+        const JacobianMethod jacobian_method =
+            parse_jacobian_method(argc >= 10 ? argv[9] : "analytic");
         const auto has_mode = [&](int mode) {
             for (const auto& stage : stages) {
                 if (stage.max_mode == mode) { return true; }
@@ -492,7 +532,8 @@ int main(int argc, char** argv) {
             };
 
             std::cout << "beginning max_mode=" << max_mode
-                      << " variables=" << boundary.size() << '\n';
+                      << " variables=" << boundary.size() << " jacobian_method="
+                      << jacobian_method_name(jacobian_method) << '\n';
             if (!iteration_directory.empty()) {
                 const std::string stem = step_stem(
                     iteration_directory, selection.workflow, max_mode, 0);
@@ -500,9 +541,17 @@ int main(int argc, char** argv) {
                               validation_options);
                 residual.write_equilibrium(initial, stem + "-equilibrium.bin");
             }
-            const meow::TrfResult result = meow::trf_least_squares(
-                std::ref(residual), initial, options,
-                [&](const meow::Vector& x) { return residual.jacobian(x); });
+            meow::TrfResult result;
+            if (jacobian_method == JacobianMethod::ANALYTIC) {
+                result = meow::trf_least_squares(
+                    std::ref(residual), initial, options,
+                    [&](const meow::Vector& x) {
+                        return residual.jacobian(x);
+                    });
+            } else {
+                result = meow::trf_least_squares(std::ref(residual), initial,
+                                                 options);
+            }
             current = residual.accept(result.x);
             write_problem(output_path, current, validation_options);
             write_problem(
@@ -512,7 +561,15 @@ int main(int argc, char** argv) {
                       << " status=" << result.message
                       << " objective=" << 2.0 * result.cost
                       << " evaluations=" << result.function_evaluations
-                      << " iterations=" << result.iterations << '\n';
+                      << " iterations=" << result.iterations
+                      << " equilibrium_evaluations="
+                      << residual.equilibrium_evaluations()
+                      << " nonlinear_iterations="
+                      << residual.total_nonlinear_iterations()
+                      << " analytic_jacobians="
+                      << residual.analytic_jacobian_evaluations()
+                      << " linear_iterations="
+                      << residual.total_linear_iterations() << '\n';
         }
         return 0;
     } catch (const std::exception& error) {

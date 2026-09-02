@@ -98,6 +98,16 @@ build-cumes/cumes_landreman_optimize \
   examples/landreman/qh_analytic.json qh-construction qh_constructed.json
 ```
 
+The optional final `JACOBIAN_METHOD` argument selects `analytic` (the default)
+or `finite-difference`. Supply the preceding optional arguments when using it;
+for example, a matched mode-1 benchmark is:
+
+```bash
+build-cumes/cumes_landreman_optimize \
+  examples/landreman/qa_analytic.json qa-construction result.json \
+  0 1 1 0 steps analytic
+```
+
 The QA construction enables the archived mean-iota target 0.42 and continues
 through maximum boundary modes 1, 2, 3, and 4. The QH construction has no iota
 target and continues through modes 1, 2, 3, 4, and 5. Both use uniform radial
