@@ -310,6 +310,7 @@ class LandremanResidual {
             cumes_meow_example::landreman_finite_difference_policy(selection_);
         constexpr double HOT_RESTART_ABSOLUTE_STEP = 1.0e-4;
         std::size_t jacobian_nonlinear_iterations = 0;
+        std::size_t cold_fallbacks = 0;
 
         for (std::size_t column = 0; column < boundary_.size(); ++column) {
             const double step =
@@ -318,10 +319,11 @@ class LandremanResidual {
                          HOT_RESTART_ABSOLUTE_STEP);
             meow::Vector perturbed_x = x;
             perturbed_x[static_cast<Eigen::Index>(column)] += step;
-            cumes::ProblemSpec problem = trial_problem(perturbed_x);
-            problem.stages = {problem.stages.back()};
+            cumes::ProblemSpec full_problem = trial_problem(perturbed_x);
+            cumes::ProblemSpec hot_problem = full_problem;
+            hot_problem.stages = {hot_problem.stages.back()};
             cumes::ValidationResult validated =
-                cumes::validate(std::move(problem), validation_options_);
+                cumes::validate(std::move(hot_problem), validation_options_);
             if (!validated.has_value()) {
                 throw std::runtime_error(first_error(
                     validated.error(),
@@ -340,10 +342,30 @@ class LandremanResidual {
             total_nonlinear_iterations_ += solved.total_iterations;
             jacobian_nonlinear_iterations += solved.total_iterations;
             if (!solved.converged || !solved.has_complete_equilibrium()) {
-                throw std::runtime_error(
-                    "hot-restart equilibrium failed for " +
-                    boundary_.name(column) + " after " +
-                    std::to_string(solved.total_iterations) + " iterations");
+                cumes::ValidationResult cold_validated = cumes::validate(
+                    std::move(full_problem), validation_options_);
+                if (!cold_validated.has_value()) {
+                    throw std::runtime_error(first_error(
+                        cold_validated.error(),
+                        "cold Jacobian fallback boundary validation failed"));
+                }
+                cumes::SolveRequest cold_request;
+                if (selection_.selected_case == LandremanCase::QH) {
+                    cold_request.radial_transfer =
+                        cumes::RadialTransferPolicy::CATMULL_ROM;
+                }
+                solved = solver_.solve(cold_validated.value(), cold_request);
+                ++evaluation_count_;
+                ++cold_fallbacks;
+                total_nonlinear_iterations_ += solved.total_iterations;
+                jacobian_nonlinear_iterations += solved.total_iterations;
+                if (!solved.converged || !solved.has_complete_equilibrium()) {
+                    throw std::runtime_error(
+                        "hot-restart and cold fallback failed for " +
+                        boundary_.name(column) + " after " +
+                        std::to_string(solved.total_iterations) +
+                        " cold iterations");
+                }
             }
 
             const auto spec = target_spec(solved.report.input_params.nfp);
@@ -379,6 +401,7 @@ class LandremanResidual {
         std::cout << "hot_restart_jacobian columns=" << result.cols()
                   << " residuals=" << result.rows()
                   << " nonlinear_iterations=" << jacobian_nonlinear_iterations
+                  << " cold_fallbacks=" << cold_fallbacks
                   << " absolute_step_floor=" << HOT_RESTART_ABSOLUTE_STEP
                   << '\n';
         ++hot_restart_jacobian_evaluations_;
