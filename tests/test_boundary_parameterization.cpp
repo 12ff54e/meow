@@ -1,5 +1,7 @@
 #include "test_support.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -37,6 +39,53 @@ int main() {
     check(applied.rbc.front().value == 1.0, "fixed rbc(0,0) is not changed");
     check(applied.rbc[3].value == 0.9,
           "modes outside the active range remain fixed");
+
+    cumes::ProblemSpec tangent_problem;
+    tangent_problem.mpol = 5;
+    tangent_problem.ntor = 4;
+    tangent_problem.angular.ntheta = 12;
+    tangent_problem.angular.nzeta = 12;
+    tangent_problem.stages = {{5, 1, 1.0}};
+    tangent_problem.toroidal_flux.coefficients = {1.0};
+    tangent_problem.iota.coefficients = {0.4};
+    tangent_problem.rbc = {{0, 0, 1.0}, {1, 0, 0.1}};
+    tangent_problem.zbs = {{1, 0, 0.1}};
+    const auto validated_tangent =
+        cumes::validate(std::move(tangent_problem), {});
+    check(validated_tangent.has_value(), "boundary tangent problem validates");
+    const auto tangent_index = [&](BoundaryFamily family, int m, int n) {
+        const auto& degrees = modes4.degrees_of_freedom();
+        const auto found = std::find_if(
+            degrees.begin(), degrees.end(), [&](const auto& degree) {
+                return degree.family == family && degree.m == m &&
+                       degree.n == n;
+            });
+        check(found != degrees.end(), "requested tangent mode exists");
+        return static_cast<std::size_t>(found - degrees.begin());
+    };
+    const auto folded_index = [](int m, int n) {
+        return static_cast<std::size_t>(m * 5 + std::abs(n));
+    };
+    const auto rbc_negative = modes4.tangent(
+        validated_tangent.value(), tangent_index(BoundaryFamily::RBC, 1, -1));
+    check(rbc_negative.rbcc[folded_index(1, -1)] == 1.0 &&
+              rbc_negative.rbss[folded_index(1, -1)] == -1.0,
+          "negative-n RBC tangent has the folded cosine/sine signs");
+    const auto rbc_positive = modes4.tangent(
+        validated_tangent.value(), tangent_index(BoundaryFamily::RBC, 1, 1));
+    check(rbc_positive.rbcc[folded_index(1, 1)] == 1.0 &&
+              rbc_positive.rbss[folded_index(1, 1)] == 1.0,
+          "positive-n RBC tangent has the folded cosine/sine signs");
+    const auto zbs_negative = modes4.tangent(
+        validated_tangent.value(), tangent_index(BoundaryFamily::ZBS, 1, -1));
+    check(zbs_negative.zbsc[folded_index(1, -1)] == 1.0 &&
+              zbs_negative.zbcs[folded_index(1, -1)] == 1.0,
+          "negative-n ZBS tangent has the folded sine/cosine signs");
+    const auto zbs_positive = modes4.tangent(
+        validated_tangent.value(), tangent_index(BoundaryFamily::ZBS, 1, 1));
+    check(zbs_positive.zbsc[folded_index(1, 1)] == 1.0 &&
+              zbs_positive.zbcs[folded_index(1, 1)] == -1.0,
+          "positive-n ZBS tangent has the folded sine/cosine signs");
 
     cumes::ProblemSpec predictor_problem;
     predictor_problem.ntor = 3;

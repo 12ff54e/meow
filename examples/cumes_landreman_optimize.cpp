@@ -15,10 +15,12 @@
 #include <cumes/config/validated_problem.hpp>
 #include <cumes/io/output_spec.hpp>
 #include <cumes/io/writer.hpp>
+#include <cumes/solver/equilibrium_linearization.hpp>
 #include <cumes/solver/equilibrium_solver.hpp>
 #include <meow/cumes/boundary_parameterization.hpp>
 #include <meow/cumes/landreman_workflow.hpp>
 #include <meow/cumes/quasisymmetry_target.hpp>
+#include <meow/cumes/quasisymmetry_target_jvp.hpp>
 #include <meow/trf.hpp>
 
 namespace {
@@ -137,6 +139,67 @@ class LandremanResidual {
         cached_residual_ = residual;
         cached_outcome_ = std::move(solved);
         return residual;
+    }
+
+    meow::Matrix jacobian(const meow::Vector& x) {
+        static_cast<void>((*this)(x));
+        if (!cached_outcome_.has_value()) {
+            throw std::runtime_error(
+                "no equilibrium is available for analytic Jacobian");
+        }
+        cumes::ProblemSpec problem = trial_problem(x);
+        cumes::ValidationResult validated =
+            cumes::validate(std::move(problem), validation_options_);
+        if (!validated.has_value()) {
+            throw std::runtime_error(first_error(
+                validated.error(), "Jacobian boundary validation failed"));
+        }
+        cumes::EquilibriumLinearization linearization(
+            validated.value(), cached_outcome_->equilibrium);
+        meow::Matrix result(cached_residual_.size(), x.size());
+        const auto spec = target_spec(cached_outcome_->report.input_params.nfp);
+        for (std::size_t column = 0; column < boundary_.size(); ++column) {
+            const cumes::BoundaryTangent boundary_tangent =
+                boundary_.tangent(validated.value(), column);
+            const cumes::SpectralTangentSolve spectral =
+                linearization.solve_boundary_tangent(boundary_tangent);
+            if (!spectral.converged) {
+                throw std::runtime_error(
+                    "equilibrium tangent solve failed for " +
+                    boundary_.name(column) + " after " +
+                    std::to_string(spectral.iterations) +
+                    " iterations; residual=" +
+                    std::to_string(spectral.final_residual));
+            }
+            const cumes::EquilibriumTangent tangent =
+                linearization.materialize_tangent(spectral.state_tangent,
+                                                  cached_outcome_->equilibrium,
+                                                  cached_outcome_->profiles);
+            const std::vector<double> target_tangent =
+                selection_.selected_case == LandremanCase::QA
+                    ? cumes_meow_example::calculate_qa_target_jvp(
+                          cached_outcome_->equilibrium,
+                          cached_outcome_->profiles, tangent,
+                          cached_outcome_->report.input_params, spec,
+                          cumes_meow_example::landreman_targets_mean_iota(
+                              selection_))
+                    : cumes_meow_example::calculate_qh_target_jvp(
+                          cached_outcome_->equilibrium,
+                          cached_outcome_->profiles, tangent,
+                          cached_outcome_->report.input_params, spec);
+            if (target_tangent.size() !=
+                static_cast<std::size_t>(result.rows())) {
+                throw std::runtime_error(
+                    "analytic target tangent has the wrong length");
+            }
+            for (std::size_t row = 0; row < target_tangent.size(); ++row) {
+                result(static_cast<Eigen::Index>(row),
+                       static_cast<Eigen::Index>(column)) = target_tangent[row];
+            }
+        }
+        std::cout << "analytic_jacobian columns=" << result.cols()
+                  << " residuals=" << result.rows() << '\n';
+        return result;
     }
 
     void write_equilibrium(const meow::Vector& x, const std::string& path) {
@@ -418,8 +481,9 @@ int main(int argc, char** argv) {
                               validation_options);
                 residual.write_equilibrium(initial, stem + "-equilibrium.bin");
             }
-            const meow::TrfResult result =
-                meow::trf_least_squares(std::ref(residual), initial, options);
+            const meow::TrfResult result = meow::trf_least_squares(
+                std::ref(residual), initial, options,
+                [&](const meow::Vector& x) { return residual.jacobian(x); });
             current = residual.accept(result.x);
             write_problem(output_path, current, validation_options);
             write_problem(

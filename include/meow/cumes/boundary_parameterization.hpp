@@ -11,7 +11,9 @@
 #include <vector>
 
 #include <cumes/config/problem_spec.hpp>
+#include <cumes/config/validated_problem.hpp>
 #include <cumes/io/equilibrium_snapshot.hpp>
+#include <cumes/solver/equilibrium_tangent.hpp>
 #include <meow/trf.hpp>
 
 namespace cumes_meow_example {
@@ -164,6 +166,32 @@ class StellaratorSymmetricBoundaryParameterization {
         const char* family = mode.family == BoundaryFamily::RBC ? "rbc" : "zbs";
         return std::string(family) + "(" + std::to_string(mode.m) + "," +
                std::to_string(mode.n) + ")";
+    }
+
+    cumes::BoundaryTangent tangent(const cumes::ValidatedProblem& problem,
+                                   std::size_t index) const {
+        if (index >= size()) {
+            throw std::out_of_range("boundary tangent index");
+        }
+        const auto& mode = degrees_of_freedom_[index];
+        if (mode.m >= problem.spec().mpol ||
+            std::abs(mode.n) > problem.spec().ntor) {
+            throw std::invalid_argument(
+                "boundary tangent mode is outside the validated basis");
+        }
+        cumes::BoundaryTangent result = cumes::BoundaryTangent::zero(problem);
+        const int n = std::abs(mode.n);
+        const std::size_t folded =
+            static_cast<std::size_t>(mode.m * (problem.spec().ntor + 1) + n);
+        const double sign = mode.n > 0 ? 1.0 : mode.n < 0 ? -1.0 : 0.0;
+        if (mode.family == BoundaryFamily::RBC) {
+            result.rbcc[folded] = 1.0;
+            if (mode.m > 0) result.rbss[folded] = sign;
+        } else {
+            if (mode.m > 0) result.zbsc[folded] = 1.0;
+            result.zbcs[folded] = -sign;
+        }
+        return result;
     }
 
    private:
