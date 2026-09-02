@@ -447,6 +447,41 @@ The result JSON, per-stage checkpoints, full QH logs, and `/usr/bin/time`
 records are retained in `../benchmark-forward-tangent-20260902` relative to
 the cuMES checkout.
 
+### Tangent-correction plan
+
+The benchmark above is not accepted as an equivalent optimization. The
+correction will proceed in the following committed slices, without moving any
+target definition into cuMES:
+
+1. Extend the nonlinear Jacobian oracle from one QH mode-1 column to selected
+   and worst-case columns at every construction mode. Use the same accepted
+   axis predictor and cold nonlinear solve policy as the optimizer. Record
+   complete residual-column error, objective directional-derivative error,
+   and the error in the optimizer-relevant gradient `J^T r`.
+2. Decompose each failing column at the cuMES/meow boundary. First compare the
+   solved spectral and published equilibrium-field tangent with the centered
+   nonlinear equilibrium difference. Then apply meow's target JVP to that
+   nonlinear field difference. This distinguishes an equilibrium tangent
+   error from a QS/aspect/iota chain-rule error.
+3. Correct the failing layer. For a cuMES linear-solve error, qualify the true
+   residual after preconditioning and use an adaptive tolerance tight enough
+   for the requested optimizer column; if the near-null equilibrium gauge
+   still changes physical fields, constrain it in the same metric as the
+   converged nonlinear trajectory. For a meow chain-rule error, correct and
+   unit-test only the optimizer-side target JVP.
+4. Add an optimizer guard that rejects an analytic Jacobian whose linear
+   solves or oracle diagnostics do not meet the qualified accuracy contract.
+   A nominal GMRES `converged` flag alone is not sufficient.
+5. Re-run QA and QH from their analytic boundaries. Acceptance requires every
+   stage to terminate normally, the final objective to agree with the matched
+   finite-difference result to a stated tolerance, and the boundary/target
+   trajectory to remain physically equivalent. Only then will the wall-clock
+   ratio be reported as an optimization speedup.
+
+The diagnostic and target work belongs to meow. Any required change to the
+equilibrium residual derivative, gauge, or tangent linear solver belongs to
+cuMES and must preserve its existing nonlinear frozen trajectories.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
