@@ -482,6 +482,59 @@ The diagnostic and target work belongs to meow. Any required change to the
 equilibrium residual derivative, gauge, or tangent linear solver belongs to
 cuMES and must preserve its existing nonlinear frozen trajectories.
 
+### Tangent correction and hot-restart outcome
+
+The correction plan was executed before accepting any speed claim. The
+expanded oracle showed that meow's target chain rule is not the limiting
+error: its worst objective-chain discrepancy was about 0.118%. The cuMES
+implicit response, however, can satisfy the linearized force equations while
+following a different member of a near-null equilibrium branch than the cold
+nonlinear black box. Selected complete residual columns differed by roughly
+10--14%. Tightening GMRES, reorthogonalizing, removing its preconditioner, and
+changing restart lengths did not remove that branch mismatch.
+
+A tight tangent Jacobian with black-box `m=0` columns improved QA to
+`4.20074375796e-6` in 2208.79 s. A subsequent 963.35 s cold polish reached
+`5.5534985509e-7`, but the combined 3172.14 s was 2.06 times the 1537.26 s
+cold control. Thus the corrected forward tangent can recover target quality,
+but it does not accelerate this optimization.
+
+The second experiment replaced the implicit response by explicit final-grid
+hot-restart differences. Each column uses an absolute step floor of `1e-4`;
+a failed hot solve retries the full cold multigrid path, and a perturbation on
+the edge of the feasible equilibrium domain may switch from forward to
+backward difference. Compatible continuation stages also retain the accepted
+equilibrium for their first evaluation. These policies stay in meow; cuMES
+still only solves the requested equilibrium.
+
+Fresh analytic-boundary runs on the same TITAN Xp and source states cuMES
+`4bf4d881943a73835a090702689f5fa0e4eb3789` and meow
+`1e433cd48660aa35f533491f6d9a06251624e700` produced:
+
+| case | Jacobian | wall time (s) | raw speed | final objective | objective / cold |
+| --- | --- | ---: | ---: | ---: | ---: |
+| QA | hot-restart difference | 1197.67 | 1.284x | `6.64013177288e-6` | 11.17x |
+| QA | cold finite difference | 1537.26 | 1.000x | `5.94683530877e-7` | 1.00x |
+| QH | hot-restart difference | 1945.78 | 1.677x | `2.77430063630e-4` | 5.17x |
+| QH | cold finite difference | 3262.78 | 1.000x | `5.36939265810e-5` | 1.00x |
+
+The raw wall-time reductions are 22.1% for QA and 40.4% for QH, but neither
+run is an equivalent-result acceleration. A finer `1e-5` hot step resumed from
+the QA endpoint in 49.94 s and stopped at `6.45131354312e-6`, confirming that
+the discrepancy is a local-minimum change rather than just the final step
+floor. A full cold mode-4 polish from the hot QA endpoint took another 1331.80
+s and stopped at `1.30948307823e-6`; the combined 2529.47 s is only 0.608x the
+cold-control speed and remains 2.20 times its objective.
+
+Consequently there is **no qualified QA or QH speedup** from the current
+forward tangent or hot-restart Jacobian. `finite-difference` remains the CLI
+default and reproduction oracle; `analytic` and `hot-finite-difference` are
+explicit experimental selectors. The complete hot logs, result JSON,
+per-stage checkpoints, and timing records are retained under
+`../benchmark-forward-tangent-qualified-20260902/qa-hot-v4` and
+`../benchmark-forward-tangent-qualified-20260902/qh-hot-v2` relative to the
+cuMES checkout. The QA polish is in the sibling `qa-hot-v4-polish` directory.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies

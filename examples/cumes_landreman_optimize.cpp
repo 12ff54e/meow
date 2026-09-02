@@ -646,8 +646,8 @@ void print_usage() {
            "FIRST_MODE/LAST_MODE select an ordered subset of the chosen "
            "workflow. ITERATION_DIRECTORY stores the "
            "input and native equilibrium for step 0 and every accepted "
-           "iteration. JACOBIAN_METHOD is analytic (default) or "
-           "hot-finite-difference, or finite-difference.\n";
+           "iteration. JACOBIAN_METHOD is finite-difference (default), "
+           "hot-finite-difference, or analytic.\n";
 }
 
 }  // namespace
@@ -672,7 +672,7 @@ int main(int argc, char** argv) {
             argc >= 8 ? std::stoull(argv[7]) : 0;
         const std::string iteration_directory = argc >= 9 ? argv[8] : "";
         const JacobianMethod jacobian_method =
-            parse_jacobian_method(argc >= 10 ? argv[9] : "analytic");
+            parse_jacobian_method(argc >= 10 ? argv[9] : "finite-difference");
         const auto has_mode = [&](int mode) {
             for (const auto& stage : stages) {
                 if (stage.max_mode == mode) { return true; }

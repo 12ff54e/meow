@@ -98,9 +98,12 @@ build-cumes/cumes_landreman_optimize \
   examples/landreman/qh_analytic.json qh-construction qh_constructed.json
 ```
 
-The optional final `JACOBIAN_METHOD` argument selects `analytic` (the default)
-or `finite-difference`. Supply the preceding optional arguments when using it;
-for example, a matched mode-1 benchmark is:
+The optional final `JACOBIAN_METHOD` argument selects `finite-difference` (the
+qualified default), `hot-finite-difference`, or `analytic`. The latter two are
+experimental acceleration paths: both can stop at a materially different
+local minimum, so use explicit `finite-difference` for reproduction results.
+Supply the preceding optional arguments when using the selector; for example,
+a matched mode-1 tangent experiment is:
 
 ```bash
 build-cumes/cumes_landreman_optimize \
@@ -116,11 +119,14 @@ drivers: 3, 5, 6, 6 for QA and 3, 5, 6, 6, 6 for QH. The existing `qa` and
 `qh` case names remain the separate final-refinement policy, which removes the
 QA iota residual and applies the final edge-weight ramps.
 
-The optimizer now obtains its dense target Jacobian from cuMES equilibrium
-tangents: one nonlinear equilibrium is retained while one matrix-free linear
-solve is applied per boundary variable, and meow differentiates the target.
-The archived runs instead used one-sided finite differences. Their
-relative/absolute steps remain recorded in the workflow policy for comparison:
+The experimental `analytic` path obtains its dense target Jacobian from cuMES
+equilibrium tangents: one nonlinear equilibrium is retained while one
+matrix-free linear solve is applied per boundary variable, and meow
+differentiates the target. The experimental `hot-finite-difference` path
+instead re-solves each perturbed equilibrium from the retained final-grid
+state, with cold and backward-difference fallbacks at feasibility boundaries.
+The archived and qualified default path uses cold one-sided finite differences.
+Its relative/absolute steps remain recorded in the workflow policy:
 `3.1622776601683794e-3` / `1e-7` for QA construction, `1e-3` / `1e-7` for QH
 construction, and `1e-5` / `1e-9` for the refinements.
 
