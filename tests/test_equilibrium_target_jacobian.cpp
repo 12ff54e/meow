@@ -211,22 +211,27 @@ int main() {
         const double step =
             std::max(finite_difference_policy.relative_step *
                          std::abs(center[static_cast<Eigen::Index>(column)]),
-                     finite_difference_policy.absolute_step);
+                     1.0e-4);
         meow::Vector values = center;
         values[static_cast<Eigen::Index>(column)] += step;
         cumes::ProblemSpec problem = boundary.apply(baseline, values);
+        problem.stages = {problem.stages.back()};
         cumes_meow_example::track_axis_predictor_from_accepted_boundary(
             problem, baseline);
         const auto perturbed = cumes::validate(std::move(problem), {});
         if (!perturbed.has_value()) {
             throw std::runtime_error("perturbed QH boundary did not validate");
         }
+        cumes::SolveRequest hot_request = request;
+        hot_request.restart = std::cref(primal.equilibrium);
         const cumes::SolveOutcome plus =
-            solver.solve(perturbed.value(), request);
+            solver.solve(perturbed.value(), hot_request);
         check(plus.converged,
               "forward QH target oracle equilibrium converges for " +
                   boundary.name(column));
         if (!plus.converged) { continue; }
+        std::cout << "QH hot-restart column=" << boundary.name(column)
+                  << " nonlinear_iterations=" << plus.total_iterations << '\n';
         const auto plus_target = cumes_meow_example::calculate_qh_target(
             plus.equilibrium, plus.profiles, plus.report.input_params, spec,
             cumes_meow_example::landreman_target_aspect(LandremanCase::QH));

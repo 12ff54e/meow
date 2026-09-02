@@ -30,20 +30,35 @@ using cumes_meow_example::LandremanCase;
 using cumes_meow_example::LandremanSelection;
 using cumes_meow_example::LandremanWorkflow;
 
-enum class JacobianMethod { ANALYTIC, FINITE_DIFFERENCE };
+enum class JacobianMethod {
+    ANALYTIC,
+    HOT_FINITE_DIFFERENCE,
+    FINITE_DIFFERENCE
+};
 
 JacobianMethod parse_jacobian_method(const std::string& name) {
     if (name == "analytic") { return JacobianMethod::ANALYTIC; }
+    if (name == "hot-finite-difference") {
+        return JacobianMethod::HOT_FINITE_DIFFERENCE;
+    }
     if (name == "finite-difference") {
         return JacobianMethod::FINITE_DIFFERENCE;
     }
     throw std::invalid_argument(
-        "JACOBIAN_METHOD must be analytic or finite-difference");
+        "JACOBIAN_METHOD must be analytic, hot-finite-difference, or "
+        "finite-difference");
 }
 
 const char* jacobian_method_name(JacobianMethod method) {
-    return method == JacobianMethod::ANALYTIC ? "analytic"
-                                              : "finite-difference";
+    switch (method) {
+        case JacobianMethod::ANALYTIC:
+            return "analytic";
+        case JacobianMethod::HOT_FINITE_DIFFERENCE:
+            return "hot-finite-difference";
+        case JacobianMethod::FINITE_DIFFERENCE:
+            return "finite-difference";
+    }
+    return "unknown";
 }
 
 std::string first_error(const cumes::ValidationReport& report,
@@ -282,6 +297,94 @@ class LandremanResidual {
         return result;
     }
 
+    meow::Matrix hot_restart_jacobian(const meow::Vector& x) {
+        static_cast<void>((*this)(x));
+        if (!cached_outcome_.has_value()) {
+            throw std::runtime_error(
+                "no equilibrium is available for hot-restart Jacobian");
+        }
+        const cumes::SolveOutcome& primal = *cached_outcome_;
+        const meow::Vector primal_residual = cached_residual_;
+        meow::Matrix result(primal_residual.size(), x.size());
+        const auto finite_difference =
+            cumes_meow_example::landreman_finite_difference_policy(selection_);
+        constexpr double HOT_RESTART_ABSOLUTE_STEP = 1.0e-4;
+        std::size_t jacobian_nonlinear_iterations = 0;
+
+        for (std::size_t column = 0; column < boundary_.size(); ++column) {
+            const double step =
+                std::max(finite_difference.relative_step *
+                             std::abs(x[static_cast<Eigen::Index>(column)]),
+                         HOT_RESTART_ABSOLUTE_STEP);
+            meow::Vector perturbed_x = x;
+            perturbed_x[static_cast<Eigen::Index>(column)] += step;
+            cumes::ProblemSpec problem = trial_problem(perturbed_x);
+            problem.stages = {problem.stages.back()};
+            cumes::ValidationResult validated =
+                cumes::validate(std::move(problem), validation_options_);
+            if (!validated.has_value()) {
+                throw std::runtime_error(first_error(
+                    validated.error(),
+                    "hot-restart Jacobian boundary validation failed"));
+            }
+
+            cumes::SolveRequest request;
+            request.restart = std::cref(primal.equilibrium);
+            if (selection_.selected_case == LandremanCase::QH) {
+                request.radial_transfer =
+                    cumes::RadialTransferPolicy::CATMULL_ROM;
+            }
+            cumes::SolveOutcome solved =
+                solver_.solve(validated.value(), request);
+            ++evaluation_count_;
+            total_nonlinear_iterations_ += solved.total_iterations;
+            jacobian_nonlinear_iterations += solved.total_iterations;
+            if (!solved.converged || !solved.has_complete_equilibrium()) {
+                throw std::runtime_error(
+                    "hot-restart equilibrium failed for " +
+                    boundary_.name(column) + " after " +
+                    std::to_string(solved.total_iterations) + " iterations");
+            }
+
+            const auto spec = target_spec(solved.report.input_params.nfp);
+            const double target_aspect =
+                cumes_meow_example::landreman_target_aspect(
+                    selection_.selected_case);
+            const cumes_meow_example::CompositeQuasisymmetryTarget target =
+                selection_.selected_case == LandremanCase::QA
+                    ? cumes_meow_example::calculate_qa_target(
+                          solved.equilibrium, solved.profiles,
+                          solved.report.input_params, spec, target_aspect,
+                          cumes_meow_example::landreman_targets_mean_iota(
+                              selection_)
+                              ? std::optional<double>(0.42)
+                              : std::nullopt)
+                    : cumes_meow_example::calculate_qh_target(
+                          solved.equilibrium, solved.profiles,
+                          solved.report.input_params, spec, target_aspect);
+            if (target.residuals.size() !=
+                static_cast<std::size_t>(result.rows())) {
+                throw std::runtime_error(
+                    "hot-restart target residual has the wrong length");
+            }
+            for (std::size_t row = 0; row < target.residuals.size(); ++row) {
+                result(static_cast<Eigen::Index>(row),
+                       static_cast<Eigen::Index>(column)) =
+                    (target.residuals[row] -
+                     primal_residual[static_cast<Eigen::Index>(row)]) /
+                    step;
+            }
+        }
+
+        std::cout << "hot_restart_jacobian columns=" << result.cols()
+                  << " residuals=" << result.rows()
+                  << " nonlinear_iterations=" << jacobian_nonlinear_iterations
+                  << " absolute_step_floor=" << HOT_RESTART_ABSOLUTE_STEP
+                  << '\n';
+        ++hot_restart_jacobian_evaluations_;
+        return result;
+    }
+
     std::size_t equilibrium_evaluations() const { return evaluation_count_; }
 
     std::size_t total_nonlinear_iterations() const {
@@ -290,6 +393,10 @@ class LandremanResidual {
 
     std::size_t analytic_jacobian_evaluations() const {
         return analytic_jacobian_evaluations_;
+    }
+
+    std::size_t hot_restart_jacobian_evaluations() const {
+        return hot_restart_jacobian_evaluations_;
     }
 
     std::size_t total_linear_iterations() const {
@@ -393,6 +500,7 @@ class LandremanResidual {
     std::size_t evaluation_count_ = 0;
     std::size_t total_nonlinear_iterations_ = 0;
     std::size_t analytic_jacobian_evaluations_ = 0;
+    std::size_t hot_restart_jacobian_evaluations_ = 0;
     std::size_t total_linear_iterations_ = 0;
     std::optional<meow::Vector> cached_x_;
     meow::Vector cached_residual_;
@@ -463,7 +571,7 @@ void print_usage() {
            "workflow. ITERATION_DIRECTORY stores the "
            "input and native equilibrium for step 0 and every accepted "
            "iteration. JACOBIAN_METHOD is analytic (default) or "
-           "finite-difference.\n";
+           "hot-finite-difference, or finite-difference.\n";
 }
 
 }  // namespace
@@ -597,6 +705,13 @@ int main(int argc, char** argv) {
                     [&](const meow::Vector& x) {
                         return residual.jacobian(x);
                     });
+            } else if (jacobian_method ==
+                       JacobianMethod::HOT_FINITE_DIFFERENCE) {
+                result = meow::trf_least_squares(
+                    std::ref(residual), initial, options,
+                    [&](const meow::Vector& x) {
+                        return residual.hot_restart_jacobian(x);
+                    });
             } else {
                 result = meow::trf_least_squares(std::ref(residual), initial,
                                                  options);
@@ -617,6 +732,8 @@ int main(int argc, char** argv) {
                       << residual.total_nonlinear_iterations()
                       << " analytic_jacobians="
                       << residual.analytic_jacobian_evaluations()
+                      << " hot_restart_jacobians="
+                      << residual.hot_restart_jacobian_evaluations()
                       << " linear_iterations="
                       << residual.total_linear_iterations() << '\n';
         }
