@@ -384,6 +384,69 @@ directions.
 | QA | `1.17642 -> 0.23840 -> 0.20441 -> 0.11054 -> 0.09879` |
 | QH | `10.57197 -> 4.99554 -> 2.02934 -> 0.64177 -> 0.11575 -> 0.06746` |
 
+### End-to-end tangent benchmark
+
+On 2026-09-02, the analytic and finite-difference Jacobian paths were run
+sequentially from the same checked-in sparse analytic boundaries through every
+construction stage. Both methods used the same Release, double-precision
+executable, target, continuation schedule, equilibrium tolerances, accepted
+axis policy, and deterministic QA chiral seed. Iteration-equilibrium output was
+disabled so that result serialization did not enter the timing. Every stage in
+all four runs stopped because the TRF step satisfied `xtol`; none reached its
+function-evaluation safeguard.
+
+The machine used an NVIDIA TITAN Xp with driver 580.173.02. The source states
+were cuMES `4bf4d881943a73835a090702689f5fa0e4eb3789` and meow
+`8eac01e82b8d1eaa508d53afd8acae2b2f223740`. The raw wall-clock results are:
+
+| case | Jacobian | wall time (s) | speed relative to finite differences | final objective |
+| --- | --- | ---: | ---: | ---: |
+| QA | forward equilibrium tangent | 473.29 | 3.248x | `6.29151469581e-4` |
+| QA | forward finite difference | 1537.26 | 1.000x | `5.94683530877e-7` |
+| QH | forward equilibrium tangent | 1387.86 | 2.351x | `1.28435967198e-3` |
+| QH | forward finite difference | 3262.78 | 1.000x | `5.36939265810e-5` |
+
+Thus the current tangent implementation reduces wall time by 69.2% for QA and
+57.5% for QH. The QH work counters show how it does so even though its less
+accurate derivatives require more accepted optimizer iterations:
+
+| QH path | accepted iterations | equilibrium evaluations | nonlinear equilibrium iterations | tangent Jacobians | tangent linear iterations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| tangent | 218 | 253 | 474,719 | 223 | 635,648 |
+| finite difference | 88 | 4,303 | 12,203,424 | 0 | 0 |
+
+This is a performance result, not yet an optimization-equivalence result. The
+tangent final objective is 1,058 times the finite-difference objective for QA
+and 23.9 times for QH. In particular, the tangent stages can satisfy `xtol`
+because their local model predicts a small useful step while finite differences
+continue to find strong descent directions. The QH tangent logs also report
+worst normalized linear residual diagnostics near 3 in the higher-mode stages.
+The forward tangent therefore needs a column-by-column accuracy investigation
+and tighter/adaptive linear-solve qualification before its raw speedup can be
+treated as acceleration of the same optimization.
+
+The timed commands, differing only in the final Jacobian selector, were:
+
+```bash
+./build/meow/cumes_landreman_optimize \
+  ../meow/examples/landreman/qa_analytic.json qa-construction RESULT.json \
+  0 1 4 0 '' analytic
+./build/meow/cumes_landreman_optimize \
+  ../meow/examples/landreman/qa_analytic.json qa-construction RESULT.json \
+  0 1 4 0 '' finite-difference
+
+./build/meow/cumes_landreman_optimize \
+  ../meow/examples/landreman/qh_analytic.json qh-construction RESULT.json \
+  0 1 5 0 '' analytic
+./build/meow/cumes_landreman_optimize \
+  ../meow/examples/landreman/qh_analytic.json qh-construction RESULT.json \
+  0 1 5 0 '' finite-difference
+```
+
+The result JSON, per-stage checkpoints, full QH logs, and `/usr/bin/time`
+records are retained in `../benchmark-forward-tangent-20260902` relative to
+the cuMES checkout.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
