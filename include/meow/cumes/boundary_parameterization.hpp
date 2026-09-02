@@ -26,6 +26,16 @@ struct BoundaryDegreeOfFreedom {
     int n;
 };
 
+// The fixed-boundary equilibrium Jacobian has a near-null radial/gauge branch
+// for centerline-shaping modes. Its implicit tangent satisfies the force
+// equations, but the optimizer's cold-solve branch can have a measurably
+// different target derivative. Keep these few columns tied to the black-box
+// map with a nonlinear finite difference.
+inline bool requires_blackbox_finite_difference(
+    const BoundaryDegreeOfFreedom& degree) {
+    return degree.m == 0;
+}
+
 inline std::vector<double> boundary_centerline_coefficients(
     const std::vector<cumes::BoundaryHarmonic>& harmonics,
     int ntor) {

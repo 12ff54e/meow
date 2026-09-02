@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <cumes/config/json_reader.hpp>
 #include <cumes/config/json_writer.hpp>
@@ -176,28 +177,41 @@ class LandremanResidual {
         meow::Matrix result(cached_residual_.size(), x.size());
         const auto spec = target_spec(cached_outcome_->report.input_params.nfp);
         cumes::TangentLinearOptions tangent_options;
+        tangent_options.max_iterations = 1000;
+        tangent_options.restart = 300;
+        tangent_options.relative_tolerance = 5.0e-6;
+        tangent_options.absolute_tolerance = 1.0e-11;
         std::size_t total_linear_iterations = 0;
         double worst_linear_residual = 0.0;
+        double worst_relative_linear_residual = 0.0;
+        std::vector<std::size_t> fallback_columns;
+        const auto& degrees = boundary_.degrees_of_freedom();
         for (std::size_t column = 0; column < boundary_.size(); ++column) {
+            if (cumes_meow_example::requires_blackbox_finite_difference(
+                    degrees[column])) {
+                fallback_columns.push_back(column);
+                continue;
+            }
             const cumes::BoundaryTangent boundary_tangent =
                 boundary_.tangent(validated.value(), column);
             const cumes::SpectralTangentSolve spectral =
                 linearization.solve_boundary_tangent(boundary_tangent,
                                                      tangent_options);
-            if (!spectral.converged) {
-                throw std::runtime_error(
-                    "equilibrium tangent solve failed for " +
-                    boundary_.name(column) + " after " +
-                    std::to_string(spectral.iterations) +
-                    " iterations; initial_residual=" +
-                    std::to_string(spectral.initial_residual) +
-                    ", final_residual=" +
-                    std::to_string(spectral.final_residual));
-            }
             total_linear_iterations +=
                 static_cast<std::size_t>(spectral.iterations);
             worst_linear_residual =
                 std::max(worst_linear_residual, spectral.final_residual);
+            const double relative_linear_residual =
+                spectral.initial_residual == 0.0
+                    ? spectral.final_residual
+                    : spectral.final_residual / spectral.initial_residual;
+            worst_relative_linear_residual = std::max(
+                worst_relative_linear_residual, relative_linear_residual);
+            if (!spectral.converged ||
+                !std::isfinite(relative_linear_residual)) {
+                fallback_columns.push_back(column);
+                continue;
+            }
             const cumes::EquilibriumTangent tangent =
                 linearization.materialize_tangent(spectral.state_tangent,
                                                   cached_outcome_->equilibrium,
@@ -219,15 +233,50 @@ class LandremanResidual {
                 throw std::runtime_error(
                     "analytic target tangent has the wrong length");
             }
+            if (!std::all_of(
+                    target_tangent.begin(), target_tangent.end(),
+                    [](double value) { return std::isfinite(value); })) {
+                fallback_columns.push_back(column);
+                continue;
+            }
             for (std::size_t row = 0; row < target_tangent.size(); ++row) {
                 result(static_cast<Eigen::Index>(row),
                        static_cast<Eigen::Index>(column)) = target_tangent[row];
             }
         }
+
+        const meow::Vector primal_residual = cached_residual_;
+        cumes::SolveOutcome primal_outcome = std::move(*cached_outcome_);
+        const auto finite_difference =
+            cumes_meow_example::landreman_finite_difference_policy(selection_);
+        for (const std::size_t column : fallback_columns) {
+            const double step =
+                std::max(finite_difference.relative_step *
+                             std::abs(x[static_cast<Eigen::Index>(column)]),
+                         finite_difference.absolute_step);
+            meow::Vector perturbed = x;
+            perturbed[static_cast<Eigen::Index>(column)] += step;
+            const meow::Vector perturbed_residual = (*this)(perturbed);
+            if (perturbed_residual.size() != result.rows()) {
+                throw std::runtime_error(
+                    "black-box fallback residual has the wrong length");
+            }
+            result.col(static_cast<Eigen::Index>(column)) =
+                (perturbed_residual - primal_residual) / step;
+        }
+        cached_x_ = x;
+        cached_residual_ = primal_residual;
+        cached_outcome_ = std::move(primal_outcome);
+
         std::cout << "analytic_jacobian columns=" << result.cols()
-                  << " residuals=" << result.rows()
+                  << " residuals=" << result.rows() << " tangent_columns="
+                  << result.cols() -
+                         static_cast<Eigen::Index>(fallback_columns.size())
+                  << " blackbox_columns=" << fallback_columns.size()
                   << " linear_iterations=" << total_linear_iterations
-                  << " worst_linear_residual=" << worst_linear_residual << '\n';
+                  << " worst_linear_residual=" << worst_linear_residual
+                  << " worst_relative_linear_residual="
+                  << worst_relative_linear_residual << '\n';
         ++analytic_jacobian_evaluations_;
         total_linear_iterations_ += total_linear_iterations;
         return result;

@@ -23,6 +23,12 @@ int main() {
     check(modes4.name(4) == "rbc(1,-4)",
           "RBC m>=1 modes include signed toroidal indices");
     check(modes4.name(40) == "zbs(0,1)", "ZBS modes follow all RBC modes");
+    check(cumes_meow_example::requires_blackbox_finite_difference(
+              modes4.degrees_of_freedom()[0]),
+          "m=0 centerline modes use the black-box Jacobian fallback");
+    check(!cumes_meow_example::requires_blackbox_finite_difference(
+              modes4.degrees_of_freedom()[4]),
+          "m>0 shaping modes use the equilibrium tangent");
 
     const meow::Vector initial = modes4.values(problem);
     check(initial[0] == 0.1, "existing coefficients are extracted");

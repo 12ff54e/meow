@@ -169,10 +169,10 @@ int main() {
     cumes::EquilibriumLinearization linearization(validated.value(),
                                                   primal.equilibrium);
     cumes::TangentLinearOptions tangent_options;
-    tangent_options.max_iterations = 2000;
+    tangent_options.max_iterations = 1000;
     tangent_options.restart = 300;
-    tangent_options.relative_tolerance = 1.0e-7;
-    tangent_options.absolute_tolerance = 1.0e-12;
+    tangent_options.relative_tolerance = 5.0e-6;
+    tangent_options.absolute_tolerance = 1.0e-11;
     const auto spec = target_spec(primal.report.input_params.nfp);
     const auto primal_target = cumes_meow_example::calculate_qh_target(
         primal.equilibrium, primal.profiles, primal.report.input_params, spec,
@@ -182,6 +182,7 @@ int main() {
     double worst_target_chain_error = 0.0;
     double worst_analytic_error = 0.0;
     double worst_objective_error = 0.0;
+    double worst_hybrid_policy_error = 0.0;
 
     for (std::size_t column = 0; column < boundary.size(); ++column) {
         const auto spectral = linearization.solve_boundary_tangent(
@@ -194,9 +195,10 @@ int main() {
                   << " relative_residual="
                   << spectral.final_residual / spectral.initial_residual
                   << '\n';
-        check(std::isfinite(spectral.final_residual) &&
+        check(spectral.converged && std::isfinite(spectral.final_residual) &&
                   spectral.state_tangent.size() == linearization.state_size(),
-              "QH equilibrium tangent solve is finite for " +
+              "QH equilibrium tangent solve reaches the production tolerance "
+              "for " +
                   boundary.name(column));
         const cumes::EquilibriumTangent tangent =
             linearization.materialize_tangent(
@@ -247,11 +249,18 @@ int main() {
         const double objective_error =
             std::abs(objective_analytic - objective_fd) /
             std::max(std::abs(objective_fd), 1.0e-12);
+        const bool uses_blackbox =
+            cumes_meow_example::requires_blackbox_finite_difference(
+                boundary.degrees_of_freedom()[column]);
+        const double hybrid_policy_error =
+            uses_blackbox ? 0.0 : objective_error;
         worst_target_chain_error =
             std::max(worst_target_chain_error, target_chain_error);
         worst_analytic_error = std::max(worst_analytic_error, analytic_error);
         worst_objective_error =
             std::max(worst_objective_error, objective_error);
+        worst_hybrid_policy_error =
+            std::max(worst_hybrid_policy_error, hybrid_policy_error);
         std::cout << "QH target tangent column=" << boundary.name(column)
                   << " step=" << step
                   << " GMRES_iterations=" << spectral.iterations
@@ -260,6 +269,8 @@ int main() {
                   << " target_chain_error=" << target_chain_error
                   << " analytic_residual_error=" << analytic_error
                   << " objective_error=" << objective_error
+                  << " hybrid_policy_error=" << hybrid_policy_error
+                  << " blackbox=" << uses_blackbox
                   << " objective_analytic=" << objective_analytic
                   << " objective_fd=" << objective_fd << '\n';
         check(std::isfinite(target_chain_error) &&
@@ -271,9 +282,13 @@ int main() {
     std::cout << "QH target tangent worst_target_chain_error="
               << worst_target_chain_error
               << " worst_analytic_residual_error=" << worst_analytic_error
-              << " worst_objective_error=" << worst_objective_error << '\n';
+              << " worst_objective_error=" << worst_objective_error
+              << " worst_hybrid_policy_error=" << worst_hybrid_policy_error
+              << '\n';
     check(worst_target_chain_error < 2.0e-2,
           "QH target chain rule agrees with the nonlinear oracle");
+    check(worst_hybrid_policy_error < 1.0e-2,
+          "hybrid QH objective Jacobian agrees with the nonlinear oracle");
 
     return meow::test::summary();
 }
