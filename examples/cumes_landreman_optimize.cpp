@@ -37,6 +37,8 @@ enum class JacobianMethod {
     JACOBIAN_SCALED,
     TWO_ACCURACY,
     TWO_ACCURACY_BROYDEN,
+    GEOMETRY_RESTART_CHECK,
+    GEOMETRY_RESTART_FINITE_DIFFERENCE,
     HOT_FINITE_DIFFERENCE,
     WARM_FINITE_DIFFERENCE,
     FINITE_DIFFERENCE
@@ -50,6 +52,12 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     if (name == "two-accuracy-broyden") {
         return JacobianMethod::TWO_ACCURACY_BROYDEN;
     }
+    if (name == "geometry-restart-check") {
+        return JacobianMethod::GEOMETRY_RESTART_CHECK;
+    }
+    if (name == "geometry-restart-finite-difference") {
+        return JacobianMethod::GEOMETRY_RESTART_FINITE_DIFFERENCE;
+    }
     if (name == "hot-finite-difference") {
         return JacobianMethod::HOT_FINITE_DIFFERENCE;
     }
@@ -61,7 +69,8 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     }
     throw std::invalid_argument(
         "JACOBIAN_METHOD must be analytic, broyden, jacobian-scaled, "
-        "two-accuracy, two-accuracy-broyden, "
+        "two-accuracy, two-accuracy-broyden, geometry-restart-check, "
+        "geometry-restart-finite-difference, "
         "hot-finite-difference, warm-finite-difference, or "
         "finite-difference");
 }
@@ -78,6 +87,10 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "two-accuracy";
         case JacobianMethod::TWO_ACCURACY_BROYDEN:
             return "two-accuracy-broyden";
+        case JacobianMethod::GEOMETRY_RESTART_CHECK:
+            return "geometry-restart-check";
+        case JacobianMethod::GEOMETRY_RESTART_FINITE_DIFFERENCE:
+            return "geometry-restart-finite-difference";
         case JacobianMethod::HOT_FINITE_DIFFERENCE:
             return "hot-finite-difference";
         case JacobianMethod::WARM_FINITE_DIFFERENCE:
@@ -370,7 +383,8 @@ class LandremanResidual {
 
     meow::Matrix restart_finite_difference_jacobian(const meow::Vector& x,
                                                     double absolute_step_floor,
-                                                    const char* label) {
+                                                    const char* label,
+                                                    bool reset_lambda = false) {
         static_cast<void>((*this)(x));
         if (!cached_outcome_.has_value()) {
             throw std::runtime_error(
@@ -381,6 +395,21 @@ class LandremanResidual {
         meow::Matrix result(primal_residual.size(), x.size());
         const auto finite_difference =
             cumes_meow_example::landreman_finite_difference_policy(selection_);
+        cumes::EquilibriumSnapshot restart_equilibrium = primal.equilibrium;
+        if (reset_lambda) {
+            std::fill(
+                restart_equilibrium.families[cumes::EquilibriumSnapshot::LMNSC]
+                    .begin(),
+                restart_equilibrium.families[cumes::EquilibriumSnapshot::LMNSC]
+                    .end(),
+                0.0);
+            std::fill(
+                restart_equilibrium.families[cumes::EquilibriumSnapshot::LMNCS]
+                    .begin(),
+                restart_equilibrium.families[cumes::EquilibriumSnapshot::LMNCS]
+                    .end(),
+                0.0);
+        }
         std::size_t jacobian_nonlinear_iterations = 0;
         std::size_t cold_fallbacks = 0;
         std::size_t backward_fallbacks = 0;
@@ -398,7 +427,7 @@ class LandremanResidual {
             }
 
             cumes::SolveRequest request;
-            request.restart = std::cref(primal.equilibrium);
+            request.restart = std::cref(restart_equilibrium);
             if (selection_.selected_case == LandremanCase::QH) {
                 request.radial_transfer =
                     cumes::RadialTransferPolicy::CATMULL_ROM;
@@ -499,6 +528,39 @@ class LandremanResidual {
     meow::Matrix warm_restart_jacobian(const meow::Vector& x) {
         return restart_finite_difference_jacobian(x, 0.0,
                                                   "warm_restart_jacobian");
+    }
+
+    meow::Matrix geometry_restart_jacobian(const meow::Vector& x) {
+        return restart_finite_difference_jacobian(
+            x, 0.0, "geometry_restart_jacobian", true);
+    }
+
+    meow::Matrix cold_finite_difference_jacobian(const meow::Vector& x) {
+        static_cast<void>((*this)(x));
+        if (!cached_outcome_.has_value()) {
+            throw std::runtime_error(
+                "no equilibrium is available for cold Jacobian");
+        }
+        const meow::Vector primal_residual = cached_residual_;
+        cumes::SolveOutcome primal_outcome = std::move(*cached_outcome_);
+        meow::Matrix result(primal_residual.size(), x.size());
+        const auto finite_difference =
+            cumes_meow_example::landreman_finite_difference_policy(selection_);
+        for (Eigen::Index column = 0; column < x.size(); ++column) {
+            const double step =
+                std::max(finite_difference.relative_step * std::abs(x[column]),
+                         finite_difference.absolute_step);
+            meow::Vector perturbed = x;
+            perturbed[column] += step;
+            const meow::Vector perturbed_residual = (*this)(perturbed);
+            result.col(column) = (perturbed_residual - primal_residual) / step;
+        }
+        cached_x_ = x;
+        cached_residual_ = primal_residual;
+        cached_outcome_ = std::move(primal_outcome);
+        std::cout << "cold_finite_difference_jacobian columns=" << result.cols()
+                  << " residuals=" << result.rows() << '\n';
+        return result;
     }
 
     std::size_t equilibrium_evaluations() const { return evaluation_count_; }
@@ -736,7 +798,8 @@ void print_usage() {
            "input and native equilibrium for step 0 and every accepted "
            "iteration. JACOBIAN_METHOD is finite-difference (default), "
            "broyden, jacobian-scaled, two-accuracy, "
-           "two-accuracy-broyden, hot-finite-difference, "
+           "two-accuracy-broyden, geometry-restart-check, "
+           "geometry-restart-finite-difference, hot-finite-difference, "
            "warm-finite-difference, or analytic.\n";
 }
 
@@ -948,7 +1011,47 @@ int main(int argc, char** argv) {
                                                stem + "-equilibrium.bin");
                 }
                 meow::TrfResult result;
-                if (jacobian_method == JacobianMethod::ANALYTIC) {
+                if (jacobian_method == JacobianMethod::GEOMETRY_RESTART_CHECK) {
+                    const meow::Matrix cold =
+                        residual.cold_finite_difference_jacobian(initial);
+                    meow::Matrix restarted =
+                        residual.geometry_restart_jacobian(initial);
+                    double worst_relative_column_error = 0.0;
+                    double mean_relative_column_error = 0.0;
+                    for (Eigen::Index column = 0; column < cold.cols();
+                         ++column) {
+                        const double denominator =
+                            std::max(cold.col(column).norm(),
+                                     std::numeric_limits<double>::min());
+                        const double error =
+                            (restarted.col(column) - cold.col(column)).norm() /
+                            denominator;
+                        worst_relative_column_error =
+                            std::max(worst_relative_column_error, error);
+                        mean_relative_column_error += error;
+                        std::cout << "geometry_restart_column=" << column
+                                  << " relative_error=" << error
+                                  << " cold_norm=" << denominator << '\n';
+                    }
+                    mean_relative_column_error /=
+                        static_cast<double>(cold.cols());
+                    std::cout << "geometry_restart_comparison "
+                              << "relative_frobenius_error="
+                              << (restarted - cold).norm() / cold.norm()
+                              << " worst_relative_column_error="
+                              << worst_relative_column_error
+                              << " mean_relative_column_error="
+                              << mean_relative_column_error << '\n';
+                    result.x = initial;
+                    result.residual = residual(initial);
+                    result.jacobian = std::move(restarted);
+                    result.gradient =
+                        result.jacobian.transpose() * result.residual;
+                    result.cost = 0.5 * result.residual.squaredNorm();
+                    result.status = meow::TrfStatus::USER_STOPPED;
+                    result.message =
+                        "Geometry-restart Jacobian comparison completed.";
+                } else if (jacobian_method == JacobianMethod::ANALYTIC) {
                     result = meow::trf_least_squares(
                         std::ref(residual), initial, options,
                         [&](const meow::Vector& x) {
@@ -967,6 +1070,13 @@ int main(int argc, char** argv) {
                         std::ref(residual), initial, options,
                         [&](const meow::Vector& x) {
                             return residual.warm_restart_jacobian(x);
+                        });
+                } else if (jacobian_method ==
+                           JacobianMethod::GEOMETRY_RESTART_FINITE_DIFFERENCE) {
+                    result = meow::trf_least_squares(
+                        std::ref(residual), initial, options,
+                        [&](const meow::Vector& x) {
+                            return residual.geometry_restart_jacobian(x);
                         });
                 } else {
                     result = meow::trf_least_squares(std::ref(residual),

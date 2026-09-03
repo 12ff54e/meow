@@ -101,7 +101,8 @@ build-cumes/cumes_landreman_optimize \
 The optional final `JACOBIAN_METHOD` argument selects `finite-difference` (the
 qualified default), `broyden`, `hot-finite-difference`,
 `warm-finite-difference`, `jacobian-scaled`, `two-accuracy`,
-`two-accuracy-broyden`, or `analytic`.
+`two-accuracy-broyden`, `geometry-restart-finite-difference`,
+`geometry-restart-check`, or `analytic`.
 The non-default methods are experimental. `broyden` uses cold finite-difference Jacobian
 refreshes with safeguarded good-Broyden updates between them.
 `jacobian-scaled` continues to refresh cold Jacobians on every accepted step
@@ -113,6 +114,10 @@ next stage; logs and optional step files label both phases.
 `two-accuracy-broyden` switches from the relaxed phase after at least eight
 steps when its objective improves by less than 1% over three accepted steps,
 then uses the safeguarded Broyden policy for the qualified polishing phase.
+`geometry-restart-finite-difference` forms each target column by restarting
+from the primal `R,Z` geometry with both lambda parity families reset to zero.
+Use `geometry-restart-check` on a selected stage to compare those columns
+directly with complete cold finite differences without optimizing.
 `hot-finite-difference` retains its historical `1e-4` step floor, while
 `warm-finite-difference` uses the qualified case-specific step exactly and
 also initializes trust-region trials from the last accepted equilibrium.
