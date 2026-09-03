@@ -669,6 +669,39 @@ relative to the cuMES checkout. The focused diagnostics are under
 `../tmp/lambda-isolation` and the corrected smoke logs under
 `../tmp/tangent-fix-smoke`.
 
+### Accepted-restart and secant-reuse experiment plan
+
+The next speed experiment retains the qualified finite-difference target
+Jacobian rather than forming one equilibrium tangent solve per boundary
+coefficient. It is split into independently reversible steps:
+
+1. Keep a snapshot of the last accepted equilibrium, separate from the most
+   recently evaluated trial. Initialize nearby trust-region trials from that
+   snapshot and initialize every Jacobian perturbation from the unperturbed
+   equilibrium. Use the existing Landreman relative and absolute difference
+   steps exactly; do not reuse the earlier `1e-4` hot-difference floor. A failed
+   restart retries the complete cold multigrid solve.
+2. Compare warm and cold residual/Jacobian columns before timing. The warm path
+   is rejected if it changes a materially nonzero target column by more than
+   1%, changes an accepted objective trajectory materially, or fails the same
+   equilibrium convergence gates.
+3. Add an optional good-Broyden update to meow's TRF implementation. The
+   default continues to rebuild every Jacobian. The experimental Landreman
+   path refreshes the finite-difference Jacobian periodically and immediately
+   after poor trust-region agreement, a large secant defect, or any invalid
+   update.
+4. Run one-accepted-step QA and QH construction smoke tests for accepted
+   restart alone, then for accepted restart plus secant reuse. Only a variant
+   that preserves the cold objective trajectory proceeds to full convergence.
+   Report wall time, equilibrium evaluations and iterations, exact Jacobian
+   builds, secant updates, and final objective against the existing cold
+   controls.
+
+All optimizer/restart policy remains in meow. cuMES continues to solve the
+supplied equilibrium request without knowledge of the target or optimization
+method. Generated inputs, equilibria, logs, and timing files belong under the
+sibling `tmp/` or benchmark directories, never in either source repository.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
