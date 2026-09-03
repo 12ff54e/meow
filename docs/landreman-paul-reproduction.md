@@ -1019,6 +1019,21 @@ therefore proceed to complete construction. Diagnostics are under
 `../tmp/parallel-fd-check-coordinated`; mode-1 artifacts are under
 `../tmp/parallel-fd-mode1`.
 
+The complete QA construction took 1,113.04 s and reached
+`5.99541035122e-7`, 1.381x faster than the 1,537.26 s historical serial-cold
+run with a final objective only 0.82% higher. Its four stages used 3,044
+equilibrium evaluations and 6,320,679 nonlinear iterations. A mode-4
+serial/concurrent diagnostic at the identical mode-3 endpoint found bit-exact
+Jacobians (80 columns; 47.73 s serial and 30.15 s concurrent), ruling out
+concurrent numerical drift. The historical full control predates the
+accepted-equilibrium continuation between compatible construction stages;
+the current and historical mode-3 JSON boundaries are bit-identical, while
+the current mode-4 stage uses that later continuation policy. Consequently
+the wall comparison is useful but not a strict same-source trajectory timing;
+a current serial callback control is needed for that stronger claim. QA
+artifacts are under `../benchmark-parallel-fd-20260904/qa` and the mode-4
+diagnostic is under `../tmp/parallel-fd-check-coordinated/qa-mode4`.
+
 If the complete two-worker runs preserve their endpoints and timing advantage,
 the next experiment will combine that orthogonal throughput improvement with
 aggressive Broyden reuse. Exact refreshes will use the same two-worker cold
