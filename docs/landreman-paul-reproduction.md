@@ -938,6 +938,20 @@ accept relative secant defects up to 0.5. Complete mode-1 QA/QH runs must beat
 the conservative Broyden timing without materially degrading the objective
 before any full construction is attempted.
 
+Both mode-1 gates passed:
+
+| case | path | wall time (s) | objective | secant updates | refresh decisions |
+| --- | --- | ---: | ---: | ---: | ---: |
+| QA | aggressive Broyden | 20.38 | `9.62613573366e-3` | 14 | 5 |
+| QA | conservative Broyden | 34.83 | `9.62278667219e-3` | 2 | 10 |
+| QH | aggressive Broyden | 25.33 | `0.140522858798` | 25 | 5 |
+| QH | conservative Broyden | 40.28 | `0.14050177654` | 4 | 12 |
+
+The aggressive policy is 1.71x faster than conservative Broyden for QA and
+1.59x faster for QH. Its objectives are higher by only 0.035% and 0.015%,
+respectively, so both cases proceed to complete construction. Preliminary
+artifacts are under `../tmp/aggressive-broyden-mode1`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
