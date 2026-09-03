@@ -1065,6 +1065,17 @@ QA used 83 equilibrium evaluations and 92,495 nonlinear iterations; QH used
 QH secant updates. Both therefore proceed to complete construction. Mode-1
 artifacts are under `../tmp/parallel-aggressive-broyden-mode1`.
 
+The complete combined QA construction took 800.78 s and reproduced every
+serial aggressive-Broyden stage endpoint, including the final
+`4.09894575473e-7` objective. This is 1.511x faster than serial aggressive
+Broyden (1,209.77 s) and 1.919x faster than the historical cold finite-
+difference run (1,537.26 s). It retained the same 35 secant updates while
+using 2,130 equilibrium evaluations and 4,450,488 nonlinear iterations,
+versus 2,172 and 4,534,044 for the serial aggressive run. The small count
+reduction comes from reusing the accepted center already supplied to the
+custom Jacobian callback. Full QA artifacts are under
+`../benchmark-parallel-aggressive-broyden-20260904/qa`.
+
 The following independent experiment will keep every accepted-center
 equilibrium at the qualified tolerance but relax only the perturbed
 finite-difference solves. A one-Jacobian QA/QH diagnostic will compare each
