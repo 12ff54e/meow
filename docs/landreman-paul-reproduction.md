@@ -1097,6 +1097,37 @@ small enough to preserve mode-1 objective quality. This isolates cheaper
 derivative sampling from the unsuccessful two-accuracy approach, which repeated
 the whole optimizer trajectory at two tolerances.
 
+The first QA diagnostic rejects a `1e-9` perturbed-solve tolerance. It reduced
+the eight-column parallel solve from 1.25 s at qualified accuracy to 0.40 s,
+but the relative Frobenius Jacobian error was 12.01, the worst column error was
+181.3, and the mean column error was 50.36. Only the two strongest columns were
+near 1.1%; equilibrium error overwhelmed the finite-difference signal in the
+other six. Before rejecting selective relaxation entirely, the diagnostic will
+test `1e-11`, the only remaining decade between this failed setting and the
+qualified `1e-12` endpoint. Artifacts are under
+`../tmp/relaxed-parallel-fd-check/qa`.
+
+The `1e-11` QA check also failed: relative Frobenius error 11.19, worst
+column error 168.9, and mean column error 46.91. Although its perturbation
+batch took 0.67 s rather than 1.25 s and used 5,562 rather than 12,171
+nonlinear iterations, two decades of tighter tolerance barely improved the
+bad columns. This points to a discrete tolerance/branch response rather than
+ordinary error proportional to the nonlinear residual. One final
+near-qualified `2e-12` check will determine whether any safe work reduction
+exists immediately above the production tolerance.
+
+That final check also failed. At `2e-12`, the relative Frobenius error was
+3.86, the worst column error was 58.25, and the mean column error was 16.18.
+The perturbation batch used 10,878 nonlinear iterations versus 12,171 at
+qualified accuracy, but wall time improved only from 1.25 s to 1.17 s. Thus
+even a 2x tolerance relaxation badly corrupts the weak derivative columns for
+about a 6% batch saving. Selectively relaxed finite differences are rejected
+without a QH optimization or diagnostic. The retained selector is
+diagnostic-only and records this near-qualified failure; all production
+parallel and Broyden paths continue to use the qualified equilibrium
+tolerance. Artifacts for all three QA checks are under
+`../tmp/relaxed-parallel-fd-check`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies

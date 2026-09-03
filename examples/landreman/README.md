@@ -104,7 +104,8 @@ qualified default), `broyden`, `aggressive-broyden`, `hot-finite-difference`,
 `two-accuracy`,
 `two-accuracy-broyden`, `geometry-restart-finite-difference`,
 `geometry-restart-check`, `parallel-finite-difference`,
-`parallel-finite-difference-check`, or `analytic`.
+`parallel-finite-difference-check`,
+`relaxed-parallel-finite-difference-check`, or `analytic`.
 The non-default methods are experimental. `broyden` uses cold finite-difference
 Jacobian refreshes with safeguarded good-Broyden updates between them.
 `aggressive-broyden` permits an eight-step Jacobian age, a 0.05 minimum trust
@@ -127,6 +128,9 @@ directly with complete cold finite differences without optimizing.
 `parallel-finite-difference` evaluates pairs of cold Jacobian columns with
 independent solver instances. Use `parallel-finite-difference-check` to compare
 the concurrent and serial matrices directly before timing an optimization.
+`relaxed-parallel-finite-difference-check` instead solves only the perturbed
+columns at tolerance `2e-12` and compares them with the qualified cold matrix;
+it is diagnostic-only until that derivative-accuracy gate passes.
 `hot-finite-difference` retains its historical `1e-4` step floor, while
 `warm-finite-difference` uses the qualified case-specific step exactly and
 also initializes trust-region trials from the last accepted equilibrium.

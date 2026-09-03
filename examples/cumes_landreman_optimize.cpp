@@ -44,6 +44,7 @@ enum class JacobianMethod {
     GEOMETRY_RESTART_CHECK,
     GEOMETRY_RESTART_FINITE_DIFFERENCE,
     PARALLEL_FINITE_DIFFERENCE_CHECK,
+    RELAXED_PARALLEL_FINITE_DIFFERENCE_CHECK,
     PARALLEL_FINITE_DIFFERENCE,
     HOT_FINITE_DIFFERENCE,
     WARM_FINITE_DIFFERENCE,
@@ -73,6 +74,9 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     if (name == "parallel-finite-difference-check") {
         return JacobianMethod::PARALLEL_FINITE_DIFFERENCE_CHECK;
     }
+    if (name == "relaxed-parallel-finite-difference-check") {
+        return JacobianMethod::RELAXED_PARALLEL_FINITE_DIFFERENCE_CHECK;
+    }
     if (name == "parallel-finite-difference") {
         return JacobianMethod::PARALLEL_FINITE_DIFFERENCE;
     }
@@ -91,7 +95,9 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
         "jacobian-scaled, "
         "two-accuracy, two-accuracy-broyden, geometry-restart-check, "
         "geometry-restart-finite-difference, "
-        "parallel-finite-difference-check, parallel-finite-difference, "
+        "parallel-finite-difference-check, "
+        "relaxed-parallel-finite-difference-check, "
+        "parallel-finite-difference, "
         "hot-finite-difference, warm-finite-difference, or "
         "finite-difference");
 }
@@ -118,6 +124,8 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "geometry-restart-finite-difference";
         case JacobianMethod::PARALLEL_FINITE_DIFFERENCE_CHECK:
             return "parallel-finite-difference-check";
+        case JacobianMethod::RELAXED_PARALLEL_FINITE_DIFFERENCE_CHECK:
+            return "relaxed-parallel-finite-difference-check";
         case JacobianMethod::PARALLEL_FINITE_DIFFERENCE:
             return "parallel-finite-difference";
         case JacobianMethod::HOT_FINITE_DIFFERENCE:
@@ -598,7 +606,9 @@ class LandremanResidual {
         return result;
     }
 
-    meow::Matrix parallel_finite_difference_jacobian(const meow::Vector& x) {
+    meow::Matrix parallel_finite_difference_jacobian(
+        const meow::Vector& x,
+        std::optional<double> relaxed_tolerance = std::nullopt) {
         static_cast<void>((*this)(x));
         if (!cached_outcome_.has_value()) {
             throw std::runtime_error(
@@ -626,6 +636,12 @@ class LandremanResidual {
                 meow::Vector perturbed = x;
                 perturbed[column] += step;
                 cumes::ProblemSpec problem = trial_problem(perturbed);
+                if (relaxed_tolerance.has_value()) {
+                    for (cumes::StageRequest& request : problem.stages) {
+                        request.tolerance =
+                            std::max(request.tolerance, *relaxed_tolerance);
+                    }
+                }
                 steps.push_back(step);
                 futures.emplace_back(std::async(
                     std::launch::async,
@@ -700,8 +716,14 @@ class LandremanResidual {
                   << result.cols() << " residuals=" << result.rows()
                   << " workers=2 nonlinear_iterations="
                   << jacobian_nonlinear_iterations
+                  << " relaxed_tolerance=" << relaxed_tolerance.value_or(0.0)
                   << " wall_seconds=" << wall_seconds << '\n';
         return result;
+    }
+
+    meow::Matrix relaxed_parallel_finite_difference_jacobian(
+        const meow::Vector& x) {
+        return parallel_finite_difference_jacobian(x, 2.0e-12);
     }
 
     std::size_t equilibrium_evaluations() const { return evaluation_count_; }
@@ -948,6 +970,7 @@ void print_usage() {
            "two-accuracy-broyden, geometry-restart-check, "
            "geometry-restart-finite-difference, hot-finite-difference, "
            "parallel-finite-difference-check, parallel-finite-difference, "
+           "relaxed-parallel-finite-difference-check, "
            "warm-finite-difference, or analytic.\n";
 }
 
@@ -1246,6 +1269,49 @@ int main(int argc, char** argv) {
                     result.cost = 0.5 * result.residual.squaredNorm();
                     result.status = meow::TrfStatus::USER_STOPPED;
                     result.message = "Parallel Jacobian comparison completed.";
+                } else if (jacobian_method ==
+                           JacobianMethod::
+                               RELAXED_PARALLEL_FINITE_DIFFERENCE_CHECK) {
+                    const meow::Matrix cold =
+                        residual.cold_finite_difference_jacobian(initial);
+                    meow::Matrix relaxed =
+                        residual.relaxed_parallel_finite_difference_jacobian(
+                            initial);
+                    double worst_relative_column_error = 0.0;
+                    double mean_relative_column_error = 0.0;
+                    for (Eigen::Index column = 0; column < cold.cols();
+                         ++column) {
+                        const double denominator =
+                            std::max(cold.col(column).norm(),
+                                     std::numeric_limits<double>::min());
+                        const double error =
+                            (relaxed.col(column) - cold.col(column)).norm() /
+                            denominator;
+                        worst_relative_column_error =
+                            std::max(worst_relative_column_error, error);
+                        mean_relative_column_error += error;
+                        std::cout << "relaxed_parallel_column=" << column
+                                  << " relative_error=" << error
+                                  << " cold_norm=" << denominator << '\n';
+                    }
+                    mean_relative_column_error /=
+                        static_cast<double>(cold.cols());
+                    std::cout << "relaxed_parallel_jacobian_comparison "
+                              << "relative_frobenius_error="
+                              << (relaxed - cold).norm() / cold.norm()
+                              << " worst_relative_column_error="
+                              << worst_relative_column_error
+                              << " mean_relative_column_error="
+                              << mean_relative_column_error << '\n';
+                    result.x = initial;
+                    result.residual = residual(initial);
+                    result.jacobian = std::move(relaxed);
+                    result.gradient =
+                        result.jacobian.transpose() * result.residual;
+                    result.cost = 0.5 * result.residual.squaredNorm();
+                    result.status = meow::TrfStatus::USER_STOPPED;
+                    result.message =
+                        "Relaxed parallel Jacobian comparison completed.";
                 } else if (jacobian_method == JacobianMethod::ANALYTIC) {
                     result = meow::trf_least_squares(
                         std::ref(residual), initial, options,
