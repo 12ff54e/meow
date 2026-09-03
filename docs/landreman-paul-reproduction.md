@@ -535,6 +535,32 @@ per-stage checkpoints, and timing records are retained under
 `../benchmark-forward-tangent-qualified-20260902/qh-hot-v2` relative to the
 cuMES checkout. The QA polish is in the sibling `qa-hot-v4-polish` directory.
 
+### Lambda-independence isolation plan
+
+The QS expression has no explicit lambda term, so lambda must not be assumed
+to explain the tangent discrepancy. The isolation is performed in this order:
+
+1. Inject the two stored `(m,n)=(0,0)` lambda coefficients, whose sine basis
+   functions vanish identically. Materialize each direction through cuMES and
+   require every published magnetic field, flux profile, aspect derivative,
+   and meow target JVP to be zero to roundoff. This tests the actual public
+   bridge rather than only the spectral input.
+2. Do not classify a general nonzero lambda harmonic as a pure gauge: it
+   changes the straight-field-line mapping unless accompanied by the matching
+   coordinate relabelling of `R` and `Z`. Such harmonics are diagnostics only.
+3. For every QH mode-1 boundary column, compare the implicit tangent with a
+   converged final-grid hot-restart difference separately for all six state
+   families, the target-facing half-grid fields, the five flux profiles,
+   aspect ratio, and the complete target residual. Record both reference norms
+   and normalized errors so a nearly zero quantity cannot masquerade as a
+   large physical discrepancy.
+4. Attribute the first material discrepancy to the earliest layer where it
+   appears: spectral equilibrium response, published-field materialization,
+   or meow target chain rule. Only that owning repository is changed.
+
+Generated logs and fixtures for this investigation belong under `../tmp`, not
+the system temporary directory.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
