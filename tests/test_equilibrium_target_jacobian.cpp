@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include <Eigen/SVD>
 #include <cumes/config/json_reader.hpp>
 #include <cumes/config/validated_problem.hpp>
 #include <cumes/solver/equilibrium_linearization.hpp>
@@ -363,6 +364,8 @@ int main() {
     double worst_analytic_error = 0.0;
     double worst_objective_error = 0.0;
     double worst_hybrid_policy_error = 0.0;
+    std::vector<std::vector<double>> branch_differences;
+    std::vector<std::string> branch_names;
 
     for (std::size_t column = 0; column < boundary.size(); ++column) {
         const cumes::BoundaryTangent boundary_tangent =
@@ -421,6 +424,57 @@ int main() {
             difference(plus_target.residuals, primal_target.residuals, step);
         const cumes::EquilibriumTangent nonlinear_tangent =
             finite_difference_tangent(primal, plus, step);
+        const std::vector<double> nonlinear_state =
+            spectral_state(nonlinear_tangent);
+        std::vector<double> branch_difference(spectral.state_tangent.size());
+        for (std::size_t index = 0; index < branch_difference.size(); ++index) {
+            branch_difference[index] =
+                spectral.state_tangent[index] - nonlinear_state[index];
+        }
+        const std::size_t family_size = primal.equilibrium.family_size();
+        double lambda_energy = 0.0;
+        double m1_mixed_rz_energy = 0.0;
+        double other_rz_energy = 0.0;
+        for (std::size_t family = 0; family < cumes::EquilibriumSnapshot::COUNT;
+             ++family) {
+            for (int mode = 0; mode < primal.equilibrium.mnmax; ++mode) {
+                const int m = mode / (primal.report.input_params.ntor + 1);
+                for (int surface = 0; surface < primal.equilibrium.ns;
+                     ++surface) {
+                    const std::size_t index =
+                        family * family_size +
+                        static_cast<std::size_t>(mode) * primal.equilibrium.ns +
+                        surface;
+                    const double energy =
+                        branch_difference[index] * branch_difference[index];
+                    if (family == cumes::EquilibriumSnapshot::LMNSC ||
+                        family == cumes::EquilibriumSnapshot::LMNCS) {
+                        lambda_energy += energy;
+                    } else if (m == 1 &&
+                               (family == cumes::EquilibriumSnapshot::RMNSS ||
+                                family == cumes::EquilibriumSnapshot::ZMNCS)) {
+                        m1_mixed_rz_energy += energy;
+                    } else {
+                        other_rz_energy += energy;
+                    }
+                }
+            }
+        }
+        const double total_branch_energy =
+            lambda_energy + m1_mixed_rz_energy + other_rz_energy;
+        std::cout << "QH branch difference column=" << boundary.name(column)
+                  << " norm=" << std::sqrt(total_branch_energy)
+                  << " implicit_norm=" << vector_norm(spectral.state_tangent)
+                  << " nonlinear_norm=" << vector_norm(nonlinear_state)
+                  << " lambda_fraction="
+                  << lambda_energy / std::max(total_branch_energy, 1.0e-30)
+                  << " m1_mixed_rz_fraction="
+                  << m1_mixed_rz_energy / std::max(total_branch_energy, 1.0e-30)
+                  << " other_rz_fraction="
+                  << other_rz_energy / std::max(total_branch_energy, 1.0e-30)
+                  << '\n';
+        branch_differences.push_back(std::move(branch_difference));
+        branch_names.push_back(boundary.name(column));
         const cumes::ResidualJvp boundary_residual =
             linearization.boundary_residual_jvp(boundary_tangent);
         const cumes::ResidualJvp implicit_combined =
@@ -438,10 +492,8 @@ int main() {
             cumes_meow_example::calculate_qh_target_jvp(
                 primal.equilibrium, primal.profiles, nonlinear_tangent,
                 primal.report.input_params, spec);
-        const std::size_t family_size = primal.equilibrium.family_size();
         std::vector<double> implicit_rz_fd_lambda = spectral.state_tangent;
-        std::vector<double> fd_rz_implicit_lambda =
-            spectral_state(nonlinear_tangent);
+        std::vector<double> fd_rz_implicit_lambda = nonlinear_state;
         for (const std::size_t lambda_family :
              {static_cast<std::size_t>(cumes::EquilibriumSnapshot::LMNSC),
               static_cast<std::size_t>(cumes::EquilibriumSnapshot::LMNCS)}) {
@@ -631,6 +683,45 @@ int main() {
               << " worst_objective_error=" << worst_objective_error
               << " worst_hybrid_policy_error=" << worst_hybrid_policy_error
               << '\n';
+    if (!branch_differences.empty()) {
+        Eigen::MatrixXd normalized_branch_matrix(
+            static_cast<Eigen::Index>(branch_differences.front().size()),
+            static_cast<Eigen::Index>(branch_differences.size()));
+        for (std::size_t column = 0; column < branch_differences.size();
+             ++column) {
+            const double scale =
+                std::max(vector_norm(branch_differences[column]), 1.0e-30);
+            for (std::size_t row = 0; row < branch_differences[column].size();
+                 ++row) {
+                normalized_branch_matrix(static_cast<Eigen::Index>(row),
+                                         static_cast<Eigen::Index>(column)) =
+                    branch_differences[column][row] / scale;
+            }
+        }
+        const Eigen::JacobiSVD<Eigen::MatrixXd> decomposition(
+            normalized_branch_matrix,
+            Eigen::ComputeThinU | Eigen::ComputeThinV);
+        std::cout << "QH normalized branch-difference singular values=";
+        for (Eigen::Index index = 0;
+             index < decomposition.singularValues().size(); ++index) {
+            if (index != 0) std::cout << ',';
+            std::cout << decomposition.singularValues()[index];
+        }
+        std::cout << '\n';
+        const Eigen::MatrixXd gram =
+            normalized_branch_matrix.transpose() * normalized_branch_matrix;
+        for (std::size_t row = 0; row < branch_names.size(); ++row) {
+            std::cout << "QH branch correlation row=" << branch_names[row]
+                      << " values=";
+            for (std::size_t column = 0; column < branch_names.size();
+                 ++column) {
+                if (column != 0) std::cout << ',';
+                std::cout << gram(static_cast<Eigen::Index>(row),
+                                  static_cast<Eigen::Index>(column));
+            }
+            std::cout << '\n';
+        }
+    }
     check(worst_target_chain_error < 2.0e-2,
           "QH target chain rule agrees with the nonlinear oracle");
     check(worst_hybrid_policy_error < 1.0e-2,
