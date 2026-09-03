@@ -110,8 +110,9 @@ but derives variable scales from their column norms.
 `1e-9` equilibrium tolerance, then restores the input's qualified tolerances
 and polishes the same stage. Only the polished equilibrium continues to the
 next stage; logs and optional step files label both phases.
-`two-accuracy-broyden` caps the relaxed phase at six accepted steps and uses
-the safeguarded Broyden policy for the qualified polishing phase.
+`two-accuracy-broyden` switches from the relaxed phase after at least eight
+steps when its objective improves by less than 1% over three accepted steps,
+then uses the safeguarded Broyden policy for the qualified polishing phase.
 `hot-finite-difference` retains its historical `1e-4` step floor, while
 `warm-finite-difference` uses the qualified case-specific step exactly and
 also initializes trust-region trials from the last accepted equilibrium.

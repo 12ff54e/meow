@@ -883,6 +883,7 @@ int main(int argc, char** argv) {
                         max_accepted_iterations * evaluations_per_iteration;
                 }
                 options.verbose = 1;
+                std::vector<double> accepted_objectives;
                 options.callback = [&](const meow::Vector& x,
                                        const meow::IterationInfo& info) {
                     current = residual.accept(x);
@@ -902,10 +903,24 @@ int main(int argc, char** argv) {
                     }
                     std::cout << " iteration=" << info.iteration
                               << " objective=" << 2.0 * info.cost << '\n';
+                    accepted_objectives.push_back(2.0 * info.cost);
+                    bool relaxed_stagnated = false;
+                    if (accepted_objectives.size() >= 4) {
+                        const double previous =
+                            accepted_objectives[accepted_objectives.size() - 4];
+                        const double current_objective =
+                            accepted_objectives.back();
+                        const double relative_progress =
+                            (previous - current_objective) /
+                            std::max(std::abs(previous),
+                                     std::numeric_limits<double>::min());
+                        relaxed_stagnated =
+                            info.iteration >= 8 && relative_progress < 0.01;
+                    }
                     const bool relaxed_cap_reached =
                         jacobian_method ==
                             JacobianMethod::TWO_ACCURACY_BROYDEN &&
-                        phase_name == "relaxed" && info.iteration >= 6;
+                        phase_name == "relaxed" && relaxed_stagnated;
                     const bool user_cap_reached =
                         max_accepted_iterations != 0 &&
                         info.iteration >= max_accepted_iterations;
