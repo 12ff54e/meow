@@ -8,6 +8,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -34,6 +35,7 @@ enum class JacobianMethod {
     ANALYTIC,
     BROYDEN,
     JACOBIAN_SCALED,
+    TWO_ACCURACY,
     HOT_FINITE_DIFFERENCE,
     WARM_FINITE_DIFFERENCE,
     FINITE_DIFFERENCE
@@ -43,6 +45,7 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     if (name == "analytic") { return JacobianMethod::ANALYTIC; }
     if (name == "broyden") { return JacobianMethod::BROYDEN; }
     if (name == "jacobian-scaled") { return JacobianMethod::JACOBIAN_SCALED; }
+    if (name == "two-accuracy") { return JacobianMethod::TWO_ACCURACY; }
     if (name == "hot-finite-difference") {
         return JacobianMethod::HOT_FINITE_DIFFERENCE;
     }
@@ -54,6 +57,7 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     }
     throw std::invalid_argument(
         "JACOBIAN_METHOD must be analytic, broyden, jacobian-scaled, "
+        "two-accuracy, "
         "hot-finite-difference, warm-finite-difference, or "
         "finite-difference");
 }
@@ -66,6 +70,8 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "broyden";
         case JacobianMethod::JACOBIAN_SCALED:
             return "jacobian-scaled";
+        case JacobianMethod::TWO_ACCURACY:
+            return "two-accuracy";
         case JacobianMethod::HOT_FINITE_DIFFERENCE:
             return "hot-finite-difference";
         case JacobianMethod::WARM_FINITE_DIFFERENCE:
@@ -637,13 +643,15 @@ class LandremanResidual {
 std::string step_stem(const std::string& directory,
                       LandremanWorkflow workflow,
                       int max_mode,
-                      std::size_t iteration) {
+                      std::size_t iteration,
+                      std::string_view phase = {}) {
     std::ostringstream name;
     if (workflow == LandremanWorkflow::CONSTRUCTION) {
         name << cumes_meow_example::landreman_workflow_name(workflow) << "-";
     }
     name << "mode" << max_mode << "_step_" << std::setw(4) << std::setfill('0')
          << iteration;
+    if (!phase.empty()) { name << "-" << phase; }
     return (std::filesystem::path(directory) / name.str()).string();
 }
 
@@ -683,6 +691,29 @@ void set_stage_resolution(cumes::ProblemSpec& problem,
     }
 }
 
+std::vector<double> stage_tolerances(const cumes::ProblemSpec& problem) {
+    std::vector<double> tolerances;
+    tolerances.reserve(problem.stages.size());
+    for (const cumes::StageRequest& request : problem.stages) {
+        tolerances.push_back(request.tolerance);
+    }
+    return tolerances;
+}
+
+void set_stage_tolerances(cumes::ProblemSpec& problem,
+                          const std::vector<double>& qualified,
+                          std::optional<double> relaxed_tolerance) {
+    if (qualified.size() != problem.stages.size()) {
+        throw std::invalid_argument("stage tolerance count changed");
+    }
+    for (std::size_t index = 0; index < problem.stages.size(); ++index) {
+        problem.stages[index].tolerance =
+            relaxed_tolerance.has_value()
+                ? std::max(qualified[index], *relaxed_tolerance)
+                : qualified[index];
+    }
+}
+
 void print_usage() {
     std::cerr
         << "usage: cumes_landreman_optimize INPUT.json "
@@ -698,7 +729,7 @@ void print_usage() {
            "workflow. ITERATION_DIRECTORY stores the "
            "input and native equilibrium for step 0 and every accepted "
            "iteration. JACOBIAN_METHOD is finite-difference (default), "
-           "broyden, jacobian-scaled, hot-finite-difference, "
+           "broyden, jacobian-scaled, two-accuracy, hot-finite-difference, "
            "warm-finite-difference, or analytic.\n";
 }
 
@@ -771,133 +802,170 @@ int main(int argc, char** argv) {
             const int max_mode = stage.max_mode;
             if (max_mode < first_mode || max_mode > last_mode) { continue; }
             set_stage_resolution(current, stage);
+            const std::vector<double> qualified_tolerances =
+                stage_tolerances(current);
             cumes_meow_example::StellaratorSymmetricBoundaryParameterization
                 boundary(max_mode);
-            const meow::Vector initial = boundary.values(current);
             const int stage_ns =
                 static_cast<int>(current.stages.back().radial_surfaces);
             const int stage_mnmax = current.mpol * (current.ntor + 1);
-            const cumes::EquilibriumSnapshot* stage_restart = nullptr;
-            if (continuation_equilibrium.has_value() &&
-                continuation_equilibrium->ns == stage_ns &&
-                continuation_equilibrium->mnmax == stage_mnmax) {
-                stage_restart = &*continuation_equilibrium;
+            using AccuracyPhase =
+                std::pair<std::string_view, std::optional<double>>;
+            std::vector<AccuracyPhase> accuracy_phases;
+            if (jacobian_method == JacobianMethod::TWO_ACCURACY) {
+                accuracy_phases.emplace_back("relaxed", 1.0e-9);
+                accuracy_phases.emplace_back("polish", std::nullopt);
+            } else {
+                accuracy_phases.emplace_back("", std::nullopt);
             }
-            LandremanResidual residual(
-                current, boundary, selection, validation_options, stage_restart,
-                jacobian_method == JacobianMethod::WARM_FINITE_DIFFERENCE);
+            std::optional<cumes::EquilibriumSnapshot> phase_equilibrium =
+                continuation_equilibrium;
 
-            meow::TrfOptions options;
-            const auto finite_difference =
-                cumes_meow_example::landreman_finite_difference_policy(
-                    selection);
-            options.finite_difference_step = finite_difference.relative_step;
-            options.finite_difference_absolute_step =
-                finite_difference.absolute_step;
-            options.max_function_evaluations = max_evaluations;
-            if (jacobian_method == JacobianMethod::BROYDEN) {
-                options.jacobian_refresh_interval = 5;
-                options.broyden_min_reduction_ratio = 0.1;
-                options.broyden_max_secant_error = 0.1;
-            }
-            if (jacobian_method == JacobianMethod::JACOBIAN_SCALED) {
-                options.scale_from_jacobian = true;
-            }
-            if (max_evaluations == 0 && max_accepted_iterations != 0) {
-                const std::size_t evaluations_per_iteration =
-                    2 * (boundary.size() + 2);
-                if (max_accepted_iterations >
-                    std::numeric_limits<std::size_t>::max() /
-                        evaluations_per_iteration) {
-                    throw std::overflow_error(
-                        "accepted-iteration evaluation budget overflow");
+            for (const AccuracyPhase& phase : accuracy_phases) {
+                const std::string_view phase_name = phase.first;
+                set_stage_tolerances(current, qualified_tolerances,
+                                     phase.second);
+                const meow::Vector initial = boundary.values(current);
+                const cumes::EquilibriumSnapshot* stage_restart = nullptr;
+                if (phase_equilibrium.has_value() &&
+                    phase_equilibrium->ns == stage_ns &&
+                    phase_equilibrium->mnmax == stage_mnmax) {
+                    stage_restart = &*phase_equilibrium;
                 }
-                options.max_function_evaluations =
-                    max_accepted_iterations * evaluations_per_iteration;
-            }
-            options.verbose = 1;
-            options.callback = [&](const meow::Vector& x,
-                                   const meow::IterationInfo& info) {
-                current = residual.accept(x);
-                write_problem(output_path, current, validation_options);
+                LandremanResidual residual(
+                    current, boundary, selection, validation_options,
+                    stage_restart,
+                    jacobian_method == JacobianMethod::WARM_FINITE_DIFFERENCE);
+
+                meow::TrfOptions options;
+                const auto finite_difference =
+                    cumes_meow_example::landreman_finite_difference_policy(
+                        selection);
+                options.finite_difference_step =
+                    finite_difference.relative_step;
+                options.finite_difference_absolute_step =
+                    finite_difference.absolute_step;
+                options.max_function_evaluations = max_evaluations;
+                if (jacobian_method == JacobianMethod::BROYDEN) {
+                    options.jacobian_refresh_interval = 5;
+                    options.broyden_min_reduction_ratio = 0.1;
+                    options.broyden_max_secant_error = 0.1;
+                }
+                if (jacobian_method == JacobianMethod::JACOBIAN_SCALED) {
+                    options.scale_from_jacobian = true;
+                }
+                if (max_evaluations == 0 && max_accepted_iterations != 0) {
+                    const std::size_t evaluations_per_iteration =
+                        2 * (boundary.size() + 2);
+                    if (max_accepted_iterations >
+                        std::numeric_limits<std::size_t>::max() /
+                            evaluations_per_iteration) {
+                        throw std::overflow_error(
+                            "accepted-iteration evaluation budget overflow");
+                    }
+                    options.max_function_evaluations =
+                        max_accepted_iterations * evaluations_per_iteration;
+                }
+                options.verbose = 1;
+                options.callback = [&](const meow::Vector& x,
+                                       const meow::IterationInfo& info) {
+                    current = residual.accept(x);
+                    write_problem(output_path, current, validation_options);
+                    if (!iteration_directory.empty()) {
+                        const std::string stem =
+                            step_stem(iteration_directory, selection.workflow,
+                                      max_mode, info.iteration, phase_name);
+                        write_problem(stem + "-input.json", current,
+                                      validation_options);
+                        residual.write_equilibrium(x,
+                                                   stem + "-equilibrium.bin");
+                    }
+                    std::cout << "accepted mode=" << max_mode;
+                    if (!phase_name.empty()) {
+                        std::cout << " phase=" << phase_name;
+                    }
+                    std::cout << " iteration=" << info.iteration
+                              << " objective=" << 2.0 * info.cost << '\n';
+                    return max_accepted_iterations == 0 ||
+                           info.iteration < max_accepted_iterations;
+                };
+
+                std::cout << "beginning max_mode=" << max_mode;
+                if (!phase_name.empty()) {
+                    std::cout << " phase=" << phase_name;
+                }
+                std::cout << " variables=" << boundary.size()
+                          << " jacobian_method="
+                          << jacobian_method_name(jacobian_method)
+                          << " equilibrium_tolerance="
+                          << current.stages.back().tolerance
+                          << " stage_restart=" << (stage_restart != nullptr)
+                          << '\n';
                 if (!iteration_directory.empty()) {
                     const std::string stem =
                         step_stem(iteration_directory, selection.workflow,
-                                  max_mode, info.iteration);
+                                  max_mode, 0, phase_name);
                     write_problem(stem + "-input.json", current,
                                   validation_options);
-                    residual.write_equilibrium(x, stem + "-equilibrium.bin");
+                    residual.write_equilibrium(initial,
+                                               stem + "-equilibrium.bin");
                 }
-                std::cout << "accepted mode=" << max_mode
-                          << " iteration=" << info.iteration
-                          << " objective=" << 2.0 * info.cost << '\n';
-                return max_accepted_iterations == 0 ||
-                       info.iteration < max_accepted_iterations;
-            };
-
-            std::cout << "beginning max_mode=" << max_mode
-                      << " variables=" << boundary.size() << " jacobian_method="
-                      << jacobian_method_name(jacobian_method)
-                      << " stage_restart=" << (stage_restart != nullptr)
-                      << '\n';
-            if (!iteration_directory.empty()) {
-                const std::string stem = step_stem(
-                    iteration_directory, selection.workflow, max_mode, 0);
-                write_problem(stem + "-input.json", current,
-                              validation_options);
-                residual.write_equilibrium(initial, stem + "-equilibrium.bin");
+                meow::TrfResult result;
+                if (jacobian_method == JacobianMethod::ANALYTIC) {
+                    result = meow::trf_least_squares(
+                        std::ref(residual), initial, options,
+                        [&](const meow::Vector& x) {
+                            return residual.jacobian(x);
+                        });
+                } else if (jacobian_method ==
+                           JacobianMethod::HOT_FINITE_DIFFERENCE) {
+                    result = meow::trf_least_squares(
+                        std::ref(residual), initial, options,
+                        [&](const meow::Vector& x) {
+                            return residual.hot_restart_jacobian(x);
+                        });
+                } else if (jacobian_method ==
+                           JacobianMethod::WARM_FINITE_DIFFERENCE) {
+                    result = meow::trf_least_squares(
+                        std::ref(residual), initial, options,
+                        [&](const meow::Vector& x) {
+                            return residual.warm_restart_jacobian(x);
+                        });
+                } else {
+                    result = meow::trf_least_squares(std::ref(residual),
+                                                     initial, options);
+                }
+                current = residual.accept(result.x);
+                phase_equilibrium = residual.equilibrium();
+                write_problem(output_path, current, validation_options);
+                std::cout << "finished max_mode=" << max_mode;
+                if (!phase_name.empty()) {
+                    std::cout << " phase=" << phase_name;
+                }
+                std::cout << " status=" << result.message
+                          << " objective=" << 2.0 * result.cost
+                          << " evaluations=" << result.function_evaluations
+                          << " iterations=" << result.iterations
+                          << " jacobian_updates=" << result.jacobian_updates
+                          << " equilibrium_evaluations="
+                          << residual.equilibrium_evaluations()
+                          << " nonlinear_iterations="
+                          << residual.total_nonlinear_iterations()
+                          << " analytic_jacobians="
+                          << residual.analytic_jacobian_evaluations()
+                          << " hot_restart_jacobians="
+                          << residual.hot_restart_jacobian_evaluations()
+                          << " restart_solve_attempts="
+                          << residual.restart_solve_attempts()
+                          << " restart_solve_failures="
+                          << residual.restart_solve_failures()
+                          << " linear_iterations="
+                          << residual.total_linear_iterations() << '\n';
             }
-            meow::TrfResult result;
-            if (jacobian_method == JacobianMethod::ANALYTIC) {
-                result = meow::trf_least_squares(
-                    std::ref(residual), initial, options,
-                    [&](const meow::Vector& x) {
-                        return residual.jacobian(x);
-                    });
-            } else if (jacobian_method ==
-                       JacobianMethod::HOT_FINITE_DIFFERENCE) {
-                result = meow::trf_least_squares(
-                    std::ref(residual), initial, options,
-                    [&](const meow::Vector& x) {
-                        return residual.hot_restart_jacobian(x);
-                    });
-            } else if (jacobian_method ==
-                       JacobianMethod::WARM_FINITE_DIFFERENCE) {
-                result = meow::trf_least_squares(
-                    std::ref(residual), initial, options,
-                    [&](const meow::Vector& x) {
-                        return residual.warm_restart_jacobian(x);
-                    });
-            } else {
-                result = meow::trf_least_squares(std::ref(residual), initial,
-                                                 options);
-            }
-            current = residual.accept(result.x);
-            continuation_equilibrium = residual.equilibrium();
-            write_problem(output_path, current, validation_options);
+            continuation_equilibrium = std::move(phase_equilibrium);
             write_problem(
                 checkpoint_path(output_path, selection.workflow, max_mode),
                 current, validation_options);
-            std::cout << "finished max_mode=" << max_mode
-                      << " status=" << result.message
-                      << " objective=" << 2.0 * result.cost
-                      << " evaluations=" << result.function_evaluations
-                      << " iterations=" << result.iterations
-                      << " jacobian_updates=" << result.jacobian_updates
-                      << " equilibrium_evaluations="
-                      << residual.equilibrium_evaluations()
-                      << " nonlinear_iterations="
-                      << residual.total_nonlinear_iterations()
-                      << " analytic_jacobians="
-                      << residual.analytic_jacobian_evaluations()
-                      << " hot_restart_jacobians="
-                      << residual.hot_restart_jacobian_evaluations()
-                      << " restart_solve_attempts="
-                      << residual.restart_solve_attempts()
-                      << " restart_solve_failures="
-                      << residual.restart_solve_failures()
-                      << " linear_iterations="
-                      << residual.total_linear_iterations() << '\n';
         }
         return 0;
     } catch (const std::exception& error) {
