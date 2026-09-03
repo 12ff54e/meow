@@ -561,6 +561,45 @@ to explain the tangent discrepancy. The isolation is performed in this order:
 Generated logs and fixtures for this investigation belong under `../tmp`, not
 the system temporary directory.
 
+The isolation produced the following result on the QH mode-1 analytic start:
+
+- Both stored zero-basis directions, `LMNSC(0,0)` and `LMNCS(0,0)`, give
+  exactly zero residual JVP, published field/profile tangent, aspect tangent,
+  and target JVP. The actual lambda gauge is therefore absent from the target
+  bridge, as required.
+- Meow's target chain applied to the nonlinear equilibrium difference agrees
+  with the fully re-evaluated target column to at worst 0.116%. The target
+  expression and its JVP are not the source of the discrepancy.
+- The implicit and nonlinear responses first differ in the spectral state,
+  including `R` and `Z`, and consequently in target-facing fields. Worst
+  finite-reference errors among the eight columns are 29.4% for `B`, 32.3%
+  for `B dot grad(B)`, 26.2% for
+  `B cross grad(psi_p) dot grad(B)`, and 39.4% for iota. `G` remains within
+  1.48%. Quantities whose nonlinear reference norm is nearly zero, such as
+  the QH-start aspect derivative for `rbc(0,1)` and `I`, are not classified by
+  relative error.
+- The complete target-residual column differs by 3.09--13.42%, while the
+  objective directional derivative is much less sensitive: at worst 0.516%
+  outside the two optimizer-designated `m=0` black-box columns. This explains
+  why a gradient-like check can pass while TRF's `J^T J` model changes.
+- Replacing only lambda or only `R/Z` between the two responses increases the
+  target-column error to 29--158%. Their separate target contributions are
+  almost antiparallel, with cosines from -0.988 to -0.997 and only 3.64--7.63%
+  of their summed norms left after cancellation. The mismatch is therefore a
+  coupled coordinate/shape response, not an isolated lambda contribution.
+- Both responses remain close to the same linearized force nullspace. The
+  implicit combined residual is about `5e-6` of the boundary forcing by
+  construction; the one-sided nonlinear-difference residual is at most
+  `2.36e-4` of that forcing. Their difference is an approximate coupled null
+  direction of the discrete equilibrium Jacobian.
+
+The first discrepant owner is consequently cuMES's equilibrium response, not
+meow's lambda-independent target. The next correction should characterize and
+constrain the coupled null direction using the nonlinear continuation metric;
+zeroing lambda or changing the target would destroy the observed physical
+cancellation. The complete diagnostic is
+`../tmp/lambda-isolation/qh-mode1-fields-final.log`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
