@@ -558,6 +558,7 @@ class LandremanResidual {
     }
 
     meow::Matrix cold_finite_difference_jacobian(const meow::Vector& x) {
+        const auto start = std::chrono::steady_clock::now();
         static_cast<void>((*this)(x));
         if (!cached_outcome_.has_value()) {
             throw std::runtime_error(
@@ -580,8 +581,13 @@ class LandremanResidual {
         cached_x_ = x;
         cached_residual_ = primal_residual;
         cached_outcome_ = std::move(primal_outcome);
+        const double wall_seconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                          start)
+                .count();
         std::cout << "cold_finite_difference_jacobian columns=" << result.cols()
-                  << " residuals=" << result.rows() << '\n';
+                  << " residuals=" << result.rows()
+                  << " wall_seconds=" << wall_seconds << '\n';
         return result;
     }
 
