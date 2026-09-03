@@ -730,6 +730,13 @@ TrfResult trf_least_squares(const ResidualFunction& residual_function,
             ratio < options.broyden_min_reduction_ratio ||
             relative_secant_error > options.broyden_max_secant_error ||
             !valid_broyden_update;
+        if (options.verbose > 0 && options.jacobian_refresh_interval > 1) {
+            std::cout << " jacobian_model="
+                      << (refresh_jacobian ? "refresh" : "broyden")
+                      << " ratio=" << ratio
+                      << " secant_error=" << relative_secant_error
+                      << " age=" << steps_since_jacobian_refresh << '\n';
+        }
         x = std::move(accepted_x);
         f = std::move(accepted_f);
         cost = accepted_cost;

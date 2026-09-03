@@ -793,7 +793,7 @@ int main(int argc, char** argv) {
             if (jacobian_method == JacobianMethod::BROYDEN) {
                 options.jacobian_refresh_interval = 5;
                 options.broyden_min_reduction_ratio = 0.1;
-                options.broyden_max_secant_error = 0.5;
+                options.broyden_max_secant_error = 0.1;
             }
             if (max_evaluations == 0 && max_accepted_iterations != 0) {
                 const std::size_t evaluations_per_iteration =
