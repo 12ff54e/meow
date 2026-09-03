@@ -918,6 +918,26 @@ trajectory and tests whether reusing only the physical `R,Z` equilibrium
 geometry—while resetting lambda—can accelerate finite-difference solves
 without the mixed-gauge branch discrepancy of full-state restarting.
 
+### Geometry-only restart outcome and broader secant plan
+
+Resetting both lambda parity families did not repair restart derivatives. On
+the analytic mode-1 QA state, the geometry-restart Jacobian differed from the
+cold Jacobian by 10.05 in relative Frobenius norm; the worst relative column
+error was 151.7. Only two of eight columns were near 1%, while the others were
+wrong by factors from 8.7 to 152. QH was worse: relative Frobenius error 310.4,
+worst column error 349.0, and even the best columns differed by 35–61%.
+Every restart solve converged and none cold-fell back, so convergence alone
+does not detect this branch mismatch. The method is rejected before optimizer
+timing. Diagnostics are under `../tmp/geometry-restart-check/{qa,qh}`.
+
+The next experiment stays on cold equilibrium branches and changes only the
+secant acceptance policy. The conservative Broyden run accepted just 7 of 64
+QA steps and 15 of 89 QH steps. An aggressive opt-in policy will allow up to
+eight steps between exact refreshes, accept trust ratios down to 0.05, and
+accept relative secant defects up to 0.5. Complete mode-1 QA/QH runs must beat
+the conservative Broyden timing without materially degrading the objective
+before any full construction is attempted.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
