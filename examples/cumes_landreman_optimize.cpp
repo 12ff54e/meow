@@ -36,6 +36,7 @@ enum class JacobianMethod {
     BROYDEN,
     JACOBIAN_SCALED,
     TWO_ACCURACY,
+    TWO_ACCURACY_BROYDEN,
     HOT_FINITE_DIFFERENCE,
     WARM_FINITE_DIFFERENCE,
     FINITE_DIFFERENCE
@@ -46,6 +47,9 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     if (name == "broyden") { return JacobianMethod::BROYDEN; }
     if (name == "jacobian-scaled") { return JacobianMethod::JACOBIAN_SCALED; }
     if (name == "two-accuracy") { return JacobianMethod::TWO_ACCURACY; }
+    if (name == "two-accuracy-broyden") {
+        return JacobianMethod::TWO_ACCURACY_BROYDEN;
+    }
     if (name == "hot-finite-difference") {
         return JacobianMethod::HOT_FINITE_DIFFERENCE;
     }
@@ -57,7 +61,7 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     }
     throw std::invalid_argument(
         "JACOBIAN_METHOD must be analytic, broyden, jacobian-scaled, "
-        "two-accuracy, "
+        "two-accuracy, two-accuracy-broyden, "
         "hot-finite-difference, warm-finite-difference, or "
         "finite-difference");
 }
@@ -72,6 +76,8 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "jacobian-scaled";
         case JacobianMethod::TWO_ACCURACY:
             return "two-accuracy";
+        case JacobianMethod::TWO_ACCURACY_BROYDEN:
+            return "two-accuracy-broyden";
         case JacobianMethod::HOT_FINITE_DIFFERENCE:
             return "hot-finite-difference";
         case JacobianMethod::WARM_FINITE_DIFFERENCE:
@@ -729,7 +735,8 @@ void print_usage() {
            "workflow. ITERATION_DIRECTORY stores the "
            "input and native equilibrium for step 0 and every accepted "
            "iteration. JACOBIAN_METHOD is finite-difference (default), "
-           "broyden, jacobian-scaled, two-accuracy, hot-finite-difference, "
+           "broyden, jacobian-scaled, two-accuracy, "
+           "two-accuracy-broyden, hot-finite-difference, "
            "warm-finite-difference, or analytic.\n";
 }
 
@@ -812,7 +819,10 @@ int main(int argc, char** argv) {
             using AccuracyPhase =
                 std::pair<std::string_view, std::optional<double>>;
             std::vector<AccuracyPhase> accuracy_phases;
-            if (jacobian_method == JacobianMethod::TWO_ACCURACY) {
+            const bool uses_two_accuracy =
+                jacobian_method == JacobianMethod::TWO_ACCURACY ||
+                jacobian_method == JacobianMethod::TWO_ACCURACY_BROYDEN;
+            if (uses_two_accuracy) {
                 accuracy_phases.emplace_back("relaxed", 1.0e-9);
                 accuracy_phases.emplace_back("polish", std::nullopt);
             } else {
@@ -828,8 +838,7 @@ int main(int argc, char** argv) {
                 const meow::Vector initial = boundary.values(current);
                 const cumes::EquilibriumSnapshot* stage_restart = nullptr;
                 const bool cold_polish =
-                    jacobian_method == JacobianMethod::TWO_ACCURACY &&
-                    phase_name == "polish";
+                    uses_two_accuracy && phase_name == "polish";
                 if (!cold_polish && phase_equilibrium.has_value() &&
                     phase_equilibrium->ns == stage_ns &&
                     phase_equilibrium->mnmax == stage_mnmax) {
@@ -849,7 +858,11 @@ int main(int argc, char** argv) {
                 options.finite_difference_absolute_step =
                     finite_difference.absolute_step;
                 options.max_function_evaluations = max_evaluations;
-                if (jacobian_method == JacobianMethod::BROYDEN) {
+                const bool uses_broyden =
+                    jacobian_method == JacobianMethod::BROYDEN ||
+                    (jacobian_method == JacobianMethod::TWO_ACCURACY_BROYDEN &&
+                     phase_name == "polish");
+                if (uses_broyden) {
                     options.jacobian_refresh_interval = 5;
                     options.broyden_min_reduction_ratio = 0.1;
                     options.broyden_max_secant_error = 0.1;
@@ -889,8 +902,14 @@ int main(int argc, char** argv) {
                     }
                     std::cout << " iteration=" << info.iteration
                               << " objective=" << 2.0 * info.cost << '\n';
-                    return max_accepted_iterations == 0 ||
-                           info.iteration < max_accepted_iterations;
+                    const bool relaxed_cap_reached =
+                        jacobian_method ==
+                            JacobianMethod::TWO_ACCURACY_BROYDEN &&
+                        phase_name == "relaxed" && info.iteration >= 6;
+                    const bool user_cap_reached =
+                        max_accepted_iterations != 0 &&
+                        info.iteration >= max_accepted_iterations;
+                    return !relaxed_cap_reached && !user_cap_reached;
                 };
 
                 std::cout << "beginning max_mode=" << max_mode;
