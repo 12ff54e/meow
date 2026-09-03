@@ -852,6 +852,36 @@ than their controls, so the method proceeds to complete QA and QH
 constructions. Preliminary artifacts are under
 `../tmp/two-accuracy-mode1-cold-polish`.
 
+### Complete two-accuracy QA outcome and capped follow-up plan
+
+Fully converging both accuracy phases did not preserve the mode-1 speedup.
+The complete QA construction took 2,299.82 s, versus 1,537.26 s for cold
+finite differences and 1,333.45 s for safeguarded Broyden. Its final
+full-accuracy objective was excellent, `4.59025456054e-7` (22.8% below the
+cold control and 9.9% below Broyden), but this is a quality improvement at
+0.669x cold speed, not an optimization-performance improvement. The eight
+relaxed/polish phase records are:
+
+| mode | phase | steps | equilibrium evaluations | nonlinear iterations | objective |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1 | relaxed | 13 | 167 | 67,106 | `9.59731261565e-3` |
+| 1 | polish | 3 | 62 | 76,461 | `9.6221676106e-3` |
+| 2 | relaxed | 17 | 475 | 399,109 | `1.65142242228e-4` |
+| 2 | polish | 4 | 149 | 322,052 | `1.59967039239e-4` |
+| 3 | relaxed | 12 | 674 | 560,618 | `6.34023072171e-6` |
+| 3 | polish | 17 | 929 | 1,915,145 | `3.14248385128e-6` |
+| 4 | relaxed | 21 | 1,808 | 1,713,035 | `1.04606370736e-6` |
+| 4 | polish | 17 | 1,481 | 3,124,445 | `4.59025456054e-7` |
+
+The late relaxed phases spend many exact-Jacobian builds on diminishing
+returns. The next isolated variant therefore caps every relaxed phase at six
+accepted steps—the first six steps contain the large reductions in the QA
+trace—and uses the already safeguarded good-Broyden policy during the cold
+`1e-12` polish. Mode-1 QA/QH controls come first. Only matching-or-better
+polished objectives with a timing win proceed to complete constructions.
+The complete uncapped QA artifacts are under
+`../benchmark-two-accuracy-20260904/qa`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
