@@ -1,6 +1,8 @@
 // Reproduce the analytic construction or final refinement from Landreman-Paul.
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -40,6 +42,8 @@ enum class JacobianMethod {
     TWO_ACCURACY_BROYDEN,
     GEOMETRY_RESTART_CHECK,
     GEOMETRY_RESTART_FINITE_DIFFERENCE,
+    PARALLEL_FINITE_DIFFERENCE_CHECK,
+    PARALLEL_FINITE_DIFFERENCE,
     HOT_FINITE_DIFFERENCE,
     WARM_FINITE_DIFFERENCE,
     FINITE_DIFFERENCE
@@ -62,6 +66,12 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     if (name == "geometry-restart-finite-difference") {
         return JacobianMethod::GEOMETRY_RESTART_FINITE_DIFFERENCE;
     }
+    if (name == "parallel-finite-difference-check") {
+        return JacobianMethod::PARALLEL_FINITE_DIFFERENCE_CHECK;
+    }
+    if (name == "parallel-finite-difference") {
+        return JacobianMethod::PARALLEL_FINITE_DIFFERENCE;
+    }
     if (name == "hot-finite-difference") {
         return JacobianMethod::HOT_FINITE_DIFFERENCE;
     }
@@ -76,6 +86,7 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
         "jacobian-scaled, "
         "two-accuracy, two-accuracy-broyden, geometry-restart-check, "
         "geometry-restart-finite-difference, "
+        "parallel-finite-difference-check, parallel-finite-difference, "
         "hot-finite-difference, warm-finite-difference, or "
         "finite-difference");
 }
@@ -98,6 +109,10 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "geometry-restart-check";
         case JacobianMethod::GEOMETRY_RESTART_FINITE_DIFFERENCE:
             return "geometry-restart-finite-difference";
+        case JacobianMethod::PARALLEL_FINITE_DIFFERENCE_CHECK:
+            return "parallel-finite-difference-check";
+        case JacobianMethod::PARALLEL_FINITE_DIFFERENCE:
+            return "parallel-finite-difference";
         case JacobianMethod::HOT_FINITE_DIFFERENCE:
             return "hot-finite-difference";
         case JacobianMethod::WARM_FINITE_DIFFERENCE:
@@ -570,6 +585,112 @@ class LandremanResidual {
         return result;
     }
 
+    meow::Matrix parallel_finite_difference_jacobian(const meow::Vector& x) {
+        static_cast<void>((*this)(x));
+        if (!cached_outcome_.has_value()) {
+            throw std::runtime_error(
+                "no equilibrium is available for parallel Jacobian");
+        }
+        const auto start = std::chrono::steady_clock::now();
+        const meow::Vector primal_residual = cached_residual_;
+        meow::Matrix result(primal_residual.size(), x.size());
+        const auto finite_difference =
+            cumes_meow_example::landreman_finite_difference_policy(selection_);
+        std::size_t jacobian_nonlinear_iterations = 0;
+
+        for (Eigen::Index first = 0; first < x.size(); first += 2) {
+            const Eigen::Index batch_size =
+                std::min<Eigen::Index>(2, x.size() - first);
+            std::vector<std::future<cumes::SolveOutcome>> futures;
+            std::vector<double> steps;
+            futures.reserve(static_cast<std::size_t>(batch_size));
+            steps.reserve(static_cast<std::size_t>(batch_size));
+            for (Eigen::Index offset = 0; offset < batch_size; ++offset) {
+                const Eigen::Index column = first + offset;
+                const double step = std::max(
+                    finite_difference.relative_step * std::abs(x[column]),
+                    finite_difference.absolute_step);
+                meow::Vector perturbed = x;
+                perturbed[column] += step;
+                cumes::ProblemSpec problem = trial_problem(perturbed);
+                steps.push_back(step);
+                futures.emplace_back(std::async(
+                    std::launch::async,
+                    [problem = std::move(problem),
+                     validation_options = validation_options_,
+                     selected_case = selection_.selected_case]() mutable {
+                        cumes::ValidationResult validated = cumes::validate(
+                            std::move(problem), validation_options);
+                        if (!validated.has_value()) {
+                            throw std::runtime_error(first_error(
+                                validated.error(),
+                                "parallel Jacobian boundary validation "
+                                "failed"));
+                        }
+                        cumes::EquilibriumSolver solver;
+                        cumes::SolveRequest request;
+                        if (selected_case == LandremanCase::QH) {
+                            request.radial_transfer =
+                                cumes::RadialTransferPolicy::CATMULL_ROM;
+                        }
+                        return solver.solve(validated.value(), request);
+                    }));
+            }
+            for (Eigen::Index offset = 0; offset < batch_size; ++offset) {
+                cumes::SolveOutcome solved =
+                    futures[static_cast<std::size_t>(offset)].get();
+                ++evaluation_count_;
+                total_nonlinear_iterations_ += solved.total_iterations;
+                jacobian_nonlinear_iterations += solved.total_iterations;
+                if (!solved.converged || !solved.has_complete_equilibrium()) {
+                    throw std::runtime_error(
+                        "parallel finite-difference equilibrium failed");
+                }
+                const auto spec = target_spec(solved.report.input_params.nfp);
+                const double target_aspect =
+                    cumes_meow_example::landreman_target_aspect(
+                        selection_.selected_case);
+                const auto target =
+                    selection_.selected_case == LandremanCase::QA
+                        ? cumes_meow_example::calculate_qa_target(
+                              solved.equilibrium, solved.profiles,
+                              solved.report.input_params, spec, target_aspect,
+                              cumes_meow_example::landreman_targets_mean_iota(
+                                  selection_)
+                                  ? std::optional<double>(0.42)
+                                  : std::nullopt)
+                        : cumes_meow_example::calculate_qh_target(
+                              solved.equilibrium, solved.profiles,
+                              solved.report.input_params, spec, target_aspect);
+                if (target.residuals.size() !=
+                    static_cast<std::size_t>(result.rows())) {
+                    throw std::runtime_error(
+                        "parallel target residual has the wrong length");
+                }
+                const Eigen::Index column = first + offset;
+                const double step = steps[static_cast<std::size_t>(offset)];
+                for (std::size_t row = 0; row < target.residuals.size();
+                     ++row) {
+                    result(static_cast<Eigen::Index>(row), column) =
+                        (target.residuals[row] -
+                         primal_residual[static_cast<Eigen::Index>(row)]) /
+                        step;
+                }
+            }
+        }
+        const double wall_seconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                          start)
+                .count();
+        ++parallel_jacobian_evaluations_;
+        std::cout << "parallel_finite_difference_jacobian columns="
+                  << result.cols() << " residuals=" << result.rows()
+                  << " workers=2 nonlinear_iterations="
+                  << jacobian_nonlinear_iterations
+                  << " wall_seconds=" << wall_seconds << '\n';
+        return result;
+    }
+
     std::size_t equilibrium_evaluations() const { return evaluation_count_; }
 
     std::size_t total_nonlinear_iterations() const {
@@ -582,6 +703,10 @@ class LandremanResidual {
 
     std::size_t hot_restart_jacobian_evaluations() const {
         return restart_jacobian_evaluations_;
+    }
+
+    std::size_t parallel_jacobian_evaluations() const {
+        return parallel_jacobian_evaluations_;
     }
 
     std::size_t restart_solve_attempts() const {
@@ -706,6 +831,7 @@ class LandremanResidual {
     std::size_t total_nonlinear_iterations_ = 0;
     std::size_t analytic_jacobian_evaluations_ = 0;
     std::size_t restart_jacobian_evaluations_ = 0;
+    std::size_t parallel_jacobian_evaluations_ = 0;
     std::size_t restart_solve_attempts_ = 0;
     std::size_t restart_solve_failures_ = 0;
     std::size_t total_linear_iterations_ = 0;
@@ -807,6 +933,7 @@ void print_usage() {
            "broyden, aggressive-broyden, jacobian-scaled, two-accuracy, "
            "two-accuracy-broyden, geometry-restart-check, "
            "geometry-restart-finite-difference, hot-finite-difference, "
+           "parallel-finite-difference-check, parallel-finite-difference, "
            "warm-finite-difference, or analytic.\n";
 }
 
@@ -1063,6 +1190,46 @@ int main(int argc, char** argv) {
                     result.status = meow::TrfStatus::USER_STOPPED;
                     result.message =
                         "Geometry-restart Jacobian comparison completed.";
+                } else if (jacobian_method ==
+                           JacobianMethod::PARALLEL_FINITE_DIFFERENCE_CHECK) {
+                    const meow::Matrix cold =
+                        residual.cold_finite_difference_jacobian(initial);
+                    meow::Matrix concurrent =
+                        residual.parallel_finite_difference_jacobian(initial);
+                    double worst_relative_column_error = 0.0;
+                    double mean_relative_column_error = 0.0;
+                    for (Eigen::Index column = 0; column < cold.cols();
+                         ++column) {
+                        const double denominator =
+                            std::max(cold.col(column).norm(),
+                                     std::numeric_limits<double>::min());
+                        const double error =
+                            (concurrent.col(column) - cold.col(column)).norm() /
+                            denominator;
+                        worst_relative_column_error =
+                            std::max(worst_relative_column_error, error);
+                        mean_relative_column_error += error;
+                        std::cout << "parallel_column=" << column
+                                  << " relative_error=" << error
+                                  << " cold_norm=" << denominator << '\n';
+                    }
+                    mean_relative_column_error /=
+                        static_cast<double>(cold.cols());
+                    std::cout << "parallel_jacobian_comparison "
+                              << "relative_frobenius_error="
+                              << (concurrent - cold).norm() / cold.norm()
+                              << " worst_relative_column_error="
+                              << worst_relative_column_error
+                              << " mean_relative_column_error="
+                              << mean_relative_column_error << '\n';
+                    result.x = initial;
+                    result.residual = residual(initial);
+                    result.jacobian = std::move(concurrent);
+                    result.gradient =
+                        result.jacobian.transpose() * result.residual;
+                    result.cost = 0.5 * result.residual.squaredNorm();
+                    result.status = meow::TrfStatus::USER_STOPPED;
+                    result.message = "Parallel Jacobian comparison completed.";
                 } else if (jacobian_method == JacobianMethod::ANALYTIC) {
                     result = meow::trf_least_squares(
                         std::ref(residual), initial, options,
@@ -1090,6 +1257,14 @@ int main(int argc, char** argv) {
                         [&](const meow::Vector& x) {
                             return residual.geometry_restart_jacobian(x);
                         });
+                } else if (jacobian_method ==
+                           JacobianMethod::PARALLEL_FINITE_DIFFERENCE) {
+                    result = meow::trf_least_squares(
+                        std::ref(residual), initial, options,
+                        [&](const meow::Vector& x) {
+                            return residual.parallel_finite_difference_jacobian(
+                                x);
+                        });
                 } else {
                     result = meow::trf_least_squares(std::ref(residual),
                                                      initial, options);
@@ -1114,6 +1289,8 @@ int main(int argc, char** argv) {
                           << residual.analytic_jacobian_evaluations()
                           << " hot_restart_jacobians="
                           << residual.hot_restart_jacobian_evaluations()
+                          << " parallel_jacobians="
+                          << residual.parallel_jacobian_evaluations()
                           << " restart_solve_attempts="
                           << residual.restart_solve_attempts()
                           << " restart_solve_failures="
