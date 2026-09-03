@@ -767,6 +767,34 @@ qualification may Jacobian scaling be combined with safeguarded Broyden reuse.
 Artifacts belong under `../tmp/jacobian-scale-smoke` and, if promoted to full
 construction, `../benchmark-jacobian-scale-20260904`.
 
+### Jacobian-scaling experiment outcome
+
+The mode-1 checks initially favored Jacobian-derived scaling. QA fell from
+18 to 12 accepted steps and took 40.74 s rather than 53.39 s, ending at
+`9.62192289293e-3`; QH fell from 21 to 17 steps and took 48.42 s rather than
+60.92 s, ending at `0.140500191495`. Both objectives were slightly lower than
+their unit-scale controls.
+
+The complete QA construction reversed that result. Scaling took 2,345.81 s,
+versus 1,537.26 s for the cold unit-scale control: **0.655x as fast**, or
+52.6% more wall time. The final objective, `5.8980706949e-7`, was 0.82% lower
+than the control's `5.94683530877e-7`, so this is a valid but slower trajectory,
+not a failed equilibrium. The regression arose mainly in the later stages:
+
+| maximum mode | accepted steps | equilibrium evaluations | nonlinear iterations | objective |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 12 | 158 | 190,174 | `9.62192289293e-3` |
+| 2 | 18 | 523 | 1,724,222 | `2.41137450101e-4` |
+| 3 | 32 | 1,658 | 4,132,021 | `4.24994425983e-6` |
+| 4 | 16 | 1,414 | 2,809,064 | `5.8980706949e-7` |
+
+Because standalone scaling failed the complete QA speed gate decisively, it
+was not promoted to a multi-hour complete QH construction and it will not be
+combined with Broyden as the next primary candidate. The opt-in selector is
+retained for controlled experiments. Full QA artifacts are under
+`../benchmark-jacobian-scale-20260904/qa`; the QA/QH mode-1 controls are under
+`../tmp/jacobian-scale-smoke`.
+
 ### Further optimizer-performance experiment plan
 
 The performance investigation will continue after Broyden and scaling. Each
