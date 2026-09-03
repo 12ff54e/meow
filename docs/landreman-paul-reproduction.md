@@ -1034,6 +1034,17 @@ a current serial callback control is needed for that stronger claim. QA
 artifacts are under `../benchmark-parallel-fd-20260904/qa` and the mode-4
 diagnostic is under `../tmp/parallel-fd-check-coordinated/qa-mode4`.
 
+The corresponding QH construction failed the full-run speed gate. Modes 1--3
+completed normally at `0.140503531818`, `1.91355839667e-3`, and
+`1.20166888048e-4`. The compatible-grid restart into mode 4 then entered a
+fixed-radius tail: by accepted step 47 the objective was
+`7.24549782542e-5` and each 80-column exact refresh took about 42 s to gain
+only about `1.7e-10` in objective. The run was stopped at 3,288.30 s, after it
+had exceeded the complete 3,262.78 s historical cold control without reaching
+mode 5. Thus two-worker exact refreshes improve individual Jacobian throughput
+but do not by themselves improve this current QH continuation trajectory.
+Partial artifacts are under `../benchmark-parallel-fd-20260904/qh`.
+
 If the complete two-worker runs preserve their endpoints and timing advantage,
 the next experiment will combine that orthogonal throughput improvement with
 aggressive Broyden reuse. Exact refreshes will use the same two-worker cold

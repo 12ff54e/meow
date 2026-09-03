@@ -100,7 +100,8 @@ build-cumes/cumes_landreman_optimize \
 
 The optional final `JACOBIAN_METHOD` argument selects `finite-difference` (the
 qualified default), `broyden`, `aggressive-broyden`, `hot-finite-difference`,
-`warm-finite-difference`, `jacobian-scaled`, `two-accuracy`,
+`parallel-aggressive-broyden`, `warm-finite-difference`, `jacobian-scaled`,
+`two-accuracy`,
 `two-accuracy-broyden`, `geometry-restart-finite-difference`,
 `geometry-restart-check`, `parallel-finite-difference`,
 `parallel-finite-difference-check`, or `analytic`.
@@ -108,6 +109,8 @@ The non-default methods are experimental. `broyden` uses cold finite-difference
 Jacobian refreshes with safeguarded good-Broyden updates between them.
 `aggressive-broyden` permits an eight-step Jacobian age, a 0.05 minimum trust
 ratio, and a 0.5 maximum relative secant defect for controlled comparisons.
+`parallel-aggressive-broyden` uses those same safeguards while evaluating each
+exact cold refresh with the two-worker callback.
 `jacobian-scaled` continues to refresh cold Jacobians on every accepted step
 but derives variable scales from their column norms.
 `two-accuracy` first optimizes each boundary-mode stage with a relaxed
