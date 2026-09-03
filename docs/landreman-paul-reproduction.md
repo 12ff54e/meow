@@ -1151,6 +1151,14 @@ complete mode-1 QA/QH optimizations before any full construction. The
 two-worker selector remains unchanged for reproducibility. Diagnostic
 artifacts are under `../tmp/parallel-worker-count-check`.
 
+The four-worker aggressive-Broyden mode-1 gates also passed with identical
+objectives and work counts. QA took 12.86 s versus 15.25 s with two workers
+(1.186x faster); QH took 17.32 s versus 19.80 s (1.143x). Peak RSS was
+197,276 KiB for QA and 199,220 KiB for QH. The smaller end-to-end gains than
+the isolated-Jacobian ratios are expected because accepted-center and trial
+solves remain serial. Both cases proceed to full construction. Mode-1
+artifacts are under `../tmp/four-worker-aggressive-broyden-mode1`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
