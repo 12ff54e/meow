@@ -898,6 +898,26 @@ two mode-2 steps, and removes nine plateau steps from mode 4. The qualified
 polish retains safeguarded Broyden reuse. The rejected fixed-cap artifacts are
 under `../tmp/two-accuracy-broyden-mode1`.
 
+The progress-based hybrid again passed mode 1: QA took 34.25 s and reached
+`9.62215468829e-3`; QH took 32.60 s and reached `0.140500389806`, speedups of
+1.56x and 1.87x over their cold controls. It nevertheless failed the complete
+QA gate. Mode-2 polishing accepted no secant updates and needed 11 steps. In
+mode 3 the polish reached about `3.6393e-6` and then took more than 20
+successive tiny steps at an almost fixed `9.8e-8` trust radius; every one
+failed the 0.1 secant-defect safeguard and rebuilt the complete Jacobian. The
+run was stopped after 21:21.55 because it had already accumulated 43 exact
+refreshes but only one Broyden update and could no longer establish an overall
+speedup. This partial benchmark is retained under
+`../benchmark-adaptive-two-accuracy-broyden-20260904/qa`.
+
+The two-accuracy experiments show that relaxed equilibria can reduce
+nonlinear-solver work, but repeating a complete least-squares optimization at
+each accuracy creates too many optimizer steps. Neither the uncapped nor the
+adaptive hybrid is promoted. The next experiment returns to one optimizer
+trajectory and tests whether reusing only the physical `R,Z` equilibrium
+geometry—while resetting lambda—can accelerate finite-difference solves
+without the mixed-gauge branch discrepancy of full-state restarting.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
