@@ -702,6 +702,53 @@ supplied equilibrium request without knowledge of the target or optimization
 method. Generated inputs, equilibria, logs, and timing files belong under the
 sibling `tmp/` or benchmark directories, never in either source repository.
 
+### Accepted-restart and secant-reuse experiment outcome
+
+The accepted-equilibrium restart was fast but failed its trajectory gate. A
+four-stage, one-accepted-step QA smoke took 98.76 s instead of 201.60 s for the
+matching cold control, and every restarted Jacobian perturbation converged
+without fallback. Nevertheless, the objectives diverged immediately: mode 1
+gave `0.246556030419` warm versus `0.302760535277` cold, and mode 2 gave
+`0.138212808326` warm versus `0.119519928704` cold. Exact production
+finite-difference steps therefore do not prevent the restart from selecting a
+different weak equilibrium branch. `warm-finite-difference` remains an
+explicit diagnostic and is not a qualified default.
+
+Safeguarded good-Broyden reuse was then isolated from restarting: every exact
+refresh remained a complete cold finite-difference Jacobian. The general TRF
+default still refreshes after every accepted step. The experimental Landreman
+`broyden` selector uses a five-step maximum age, refreshes when the trust ratio
+is below 0.1 or the relative secant defect exceeds 0.1, and reports every
+decision. Mode-1 convergence checks gave:
+
+| case | path | wall time (s) | objective | equilibrium evaluations | nonlinear iterations |
+| --- | --- | ---: | ---: | ---: | ---: |
+| QA | safeguarded Broyden | 34.83 | `9.62278667219e-3` | 136 | 169,745 |
+| QA | cold refresh every step | 53.39 | `9.62220283167e-3` | 214 | 264,315 |
+| QH | safeguarded Broyden | 40.28 | `0.14050177654` | 161 | 193,894 |
+| QH | cold refresh every step | 60.92 | `0.140503531818` | 242 | 295,662 |
+
+Both cases were therefore continued through their complete analytic-boundary
+construction on the same TITAN Xp. Every stage stopped normally by `xtol`:
+
+| case | path | wall time (s) | speed / cold | final objective | objective / cold |
+| --- | --- | ---: | ---: | ---: | ---: |
+| QA | safeguarded Broyden | 1333.45 | 1.153x | `5.09650574804e-7` | 0.857x |
+| QA | cold refresh every step | 1537.26 | 1.000x | `5.94683530877e-7` | 1.000x |
+| QH | safeguarded Broyden | 3016.60 | 1.082x | `3.84152264277e-5` | 0.715x |
+| QH | cold refresh every step | 3262.78 | 1.000x | `5.36939265810e-5` | 1.000x |
+
+QA accepted seven secant updates across all four stages. QH accepted 15 across
+five stages; its total equilibrium evaluations fell from 4,303 to 3,979 and
+nonlinear iterations from 12,203,424 to 11,052,763. The last QA stage accepted
+no secant update, so its endpoint was terminated using exact cold Jacobians.
+The sparse earlier updates alter the continuation path and reach lower local
+minima in both cases. These are valid improvements in time and achieved
+objective, but they are not identical-trajectory speedups. Complete artifacts
+are under `../benchmark-broyden-20260904/{qa,qh}` relative to the cuMES
+checkout; focused controls are under `../tmp/warm-fd-smoke` and
+`../tmp/broyden-smoke`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
