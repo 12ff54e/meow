@@ -1128,6 +1128,19 @@ parallel and Broyden paths continue to use the qualified equilibrium
 tolerance. Artifacts for all three QA checks are under
 `../tmp/relaxed-parallel-fd-check`.
 
+### Worker-count scaling experiment plan
+
+The next experiment keeps the now-qualified cold branch, target, finite-
+difference steps, and aggressive-Broyden policy unchanged, and varies only
+the number of independent Jacobian-column workers. A four-worker diagnostic
+will compare its matrix bit-for-bit with the serial qualified Jacobian and
+measure it against the existing two-worker callback for mode-1 QA and QH.
+Peak memory and solver convergence remain gates. Four workers will be promoted
+to a complete optimizer only if both cases are exact and show a material
+single-Jacobian wall-time improvement; otherwise two remains the qualified
+default. This tests available device concurrency without changing any
+optimization mathematics.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
