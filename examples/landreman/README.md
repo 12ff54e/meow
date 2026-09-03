@@ -99,9 +99,14 @@ build-cumes/cumes_landreman_optimize \
 ```
 
 The optional final `JACOBIAN_METHOD` argument selects `finite-difference` (the
-qualified default), `hot-finite-difference`, or `analytic`. The latter two are
-experimental acceleration paths: both can stop at a materially different
-local minimum, so use explicit `finite-difference` for reproduction results.
+qualified default), `hot-finite-difference`, `warm-finite-difference`, or
+`analytic`. The non-default methods are experimental.
+`hot-finite-difference` retains its historical `1e-4` step floor, while
+`warm-finite-difference` uses the qualified case-specific step exactly and
+also initializes trust-region trials from the last accepted equilibrium.
+Restarted equilibria can select a different weak branch and hence a different
+optimizer trajectory, so use explicit `finite-difference` for reproduction
+results.
 Supply the preceding optional arguments when using the selector; for example,
 a matched mode-1 tangent experiment is:
 
