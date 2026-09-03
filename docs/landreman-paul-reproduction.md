@@ -826,6 +826,32 @@ Generated data remains outside the repositories under dated sibling `tmp/`
 or benchmark directories. A negative result is retained in this document so
 that it is not silently promoted or repeated.
 
+### Two-accuracy preliminary result
+
+The first implementation restarted the qualified polishing center from the
+relaxed equilibrium while forming its finite-difference columns with cold
+solves. QH exposed this as the same mixed-branch inconsistency seen in the
+earlier restart experiment: polishing accepted no step. The corrected policy
+therefore uses cold `1e-12` solves for both the polishing center and all of its
+Jacobian columns. The relaxed equilibrium influences only the boundary passed
+to polishing, not its equilibrium branch.
+
+With that correction, complete mode-1 runs passed for both cases:
+
+| case | path | wall time (s) | speed / cold | polished objective |
+| --- | --- | ---: | ---: | ---: |
+| QA | `1e-9` optimize + cold `1e-12` polish | 32.44 | 1.646x | `9.6221676106e-3` |
+| QA | cold `1e-12` control | 53.39 | 1.000x | `9.62220283167e-3` |
+| QH | `1e-9` optimize + cold `1e-12` polish | 42.58 | 1.431x | `0.140502193535` |
+| QH | cold `1e-12` control | 60.92 | 1.000x | `0.140503531818` |
+
+The relaxed QA phase used 67,106 nonlinear equilibrium iterations and its
+three-step polish used 76,461; the relaxed QH phase used 114,658 and its
+three-step polish used 79,109. Both polished objectives are slightly lower
+than their controls, so the method proceeds to complete QA and QH
+constructions. Preliminary artifacts are under
+`../tmp/two-accuracy-mode1-cold-polish`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
