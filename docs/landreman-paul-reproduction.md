@@ -749,6 +749,24 @@ are under `../benchmark-broyden-20260904/{qa,qh}` relative to the cuMES
 checkout; focused controls are under `../tmp/warm-fd-smoke` and
 `../tmp/broyden-smoke`.
 
+### Jacobian-scaling experiment plan
+
+The next independent experiment addresses the unit boundary-variable scaling
+used by the current Landreman driver. Meow will add an opt-in TRF policy
+equivalent to Jacobian column-norm scaling: after each exact Jacobian or secant
+update, the characteristic scale of a variable is the reciprocal of its
+column norm, with nondecreasing inverse scales to avoid expanding a direction
+as the solve progresses. Fixed user scales and Jacobian-derived scales are
+mutually exclusive; the default remains fixed unit scaling.
+
+The first QA/QH tests use cold finite-difference Jacobians after every accepted
+step, so scaling is the only changed variable. Mode-1 convergence must retain
+a comparable or better objective and reduce wall time or accepted iterations
+before a complete construction run is attempted. Only after independent
+qualification may Jacobian scaling be combined with safeguarded Broyden reuse.
+Artifacts belong under `../tmp/jacobian-scale-smoke` and, if promoted to full
+construction, `../benchmark-jacobian-scale-20260904`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
