@@ -827,7 +827,10 @@ int main(int argc, char** argv) {
                                      phase.second);
                 const meow::Vector initial = boundary.values(current);
                 const cumes::EquilibriumSnapshot* stage_restart = nullptr;
-                if (phase_equilibrium.has_value() &&
+                const bool cold_polish =
+                    jacobian_method == JacobianMethod::TWO_ACCURACY &&
+                    phase_name == "polish";
+                if (!cold_polish && phase_equilibrium.has_value() &&
                     phase_equilibrium->ns == stage_ns &&
                     phase_equilibrium->mnmax == stage_mnmax) {
                     stage_restart = &*phase_equilibrium;
