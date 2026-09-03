@@ -1076,6 +1076,18 @@ reduction comes from reusing the accepted center already supplied to the
 custom Jacobian callback. Full QA artifacts are under
 `../benchmark-parallel-aggressive-broyden-20260904/qa`.
 
+The complete combined QH construction likewise reproduced every serial
+aggressive-Broyden stage endpoint and the final `3.99555777572e-5` objective.
+It took 1,741.81 s, a 1.539x speedup over serial aggressive Broyden
+(2,681.44 s) and 1.873x over the historical cold run (3,262.78 s). It used
+3,520 equilibrium evaluations and 9,876,526 nonlinear iterations, down from
+3,581 and 10,036,912. In particular, mode 4 terminated in 16 steps at
+`5.49653893098e-5`; the exact-refresh-only parallel run had still been in its
+fixed-radius mode-4 tail after 47 steps. The combined method is therefore the
+fastest qualified QA/QH method tested so far, while retaining the exact
+serial-aggressive endpoints. Full artifacts are under
+`../benchmark-parallel-aggressive-broyden-20260904/{qa,qh}`.
+
 The following independent experiment will keep every accepted-center
 equilibrium at the qualified tolerance but relax only the perturbed
 finite-difference solves. A one-Jacobian QA/QH diagnostic will compare each
