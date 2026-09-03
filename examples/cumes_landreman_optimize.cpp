@@ -34,6 +34,7 @@ using cumes_meow_example::LandremanWorkflow;
 enum class JacobianMethod {
     ANALYTIC,
     BROYDEN,
+    AGGRESSIVE_BROYDEN,
     JACOBIAN_SCALED,
     TWO_ACCURACY,
     TWO_ACCURACY_BROYDEN,
@@ -47,6 +48,9 @@ enum class JacobianMethod {
 JacobianMethod parse_jacobian_method(const std::string& name) {
     if (name == "analytic") { return JacobianMethod::ANALYTIC; }
     if (name == "broyden") { return JacobianMethod::BROYDEN; }
+    if (name == "aggressive-broyden") {
+        return JacobianMethod::AGGRESSIVE_BROYDEN;
+    }
     if (name == "jacobian-scaled") { return JacobianMethod::JACOBIAN_SCALED; }
     if (name == "two-accuracy") { return JacobianMethod::TWO_ACCURACY; }
     if (name == "two-accuracy-broyden") {
@@ -68,7 +72,8 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
         return JacobianMethod::FINITE_DIFFERENCE;
     }
     throw std::invalid_argument(
-        "JACOBIAN_METHOD must be analytic, broyden, jacobian-scaled, "
+        "JACOBIAN_METHOD must be analytic, broyden, aggressive-broyden, "
+        "jacobian-scaled, "
         "two-accuracy, two-accuracy-broyden, geometry-restart-check, "
         "geometry-restart-finite-difference, "
         "hot-finite-difference, warm-finite-difference, or "
@@ -81,6 +86,8 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "analytic";
         case JacobianMethod::BROYDEN:
             return "broyden";
+        case JacobianMethod::AGGRESSIVE_BROYDEN:
+            return "aggressive-broyden";
         case JacobianMethod::JACOBIAN_SCALED:
             return "jacobian-scaled";
         case JacobianMethod::TWO_ACCURACY:
@@ -797,7 +804,7 @@ void print_usage() {
            "workflow. ITERATION_DIRECTORY stores the "
            "input and native equilibrium for step 0 and every accepted "
            "iteration. JACOBIAN_METHOD is finite-difference (default), "
-           "broyden, jacobian-scaled, two-accuracy, "
+           "broyden, aggressive-broyden, jacobian-scaled, two-accuracy, "
            "two-accuracy-broyden, geometry-restart-check, "
            "geometry-restart-finite-difference, hot-finite-difference, "
            "warm-finite-difference, or analytic.\n";
@@ -929,6 +936,11 @@ int main(int argc, char** argv) {
                     options.jacobian_refresh_interval = 5;
                     options.broyden_min_reduction_ratio = 0.1;
                     options.broyden_max_secant_error = 0.1;
+                }
+                if (jacobian_method == JacobianMethod::AGGRESSIVE_BROYDEN) {
+                    options.jacobian_refresh_interval = 8;
+                    options.broyden_min_reduction_ratio = 0.05;
+                    options.broyden_max_secant_error = 0.5;
                 }
                 if (jacobian_method == JacobianMethod::JACOBIAN_SCALED) {
                     options.scale_from_jacobian = true;
