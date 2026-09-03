@@ -462,6 +462,11 @@ void validate_inputs(const ResidualFunction& residual,
         throw std::invalid_argument(
             "TRF x_scale entries must be positive and finite");
     }
+    if (options.scale_from_jacobian && options.x_scale.size() != 0) {
+        throw std::invalid_argument(
+            "TRF explicit and Jacobian-derived scales are mutually "
+            "exclusive");
+    }
     if (options.jacobian_refresh_interval == 0) {
         throw std::invalid_argument(
             "TRF Jacobian refresh interval must be positive");
@@ -490,10 +495,9 @@ TrfResult trf_least_squares(const ResidualFunction& residual_function,
     validate_inputs(residual_function, initial_x, bounds, options);
 
     const Eigen::Index variable_count = initial_x.size();
-    const Vector scale = options.x_scale.size() == 0
-                             ? Vector::Ones(variable_count)
-                             : options.x_scale;
-    const Vector inverse_scale = scale.cwiseInverse();
+    Vector scale = options.x_scale.size() == 0 ? Vector::Ones(variable_count)
+                                               : options.x_scale;
+    Vector inverse_scale = scale.cwiseInverse();
     const std::size_t max_evaluations =
         options.max_function_evaluations == 0
             ? static_cast<std::size_t>(100 * variable_count)
@@ -582,6 +586,24 @@ TrfResult trf_least_squares(const ResidualFunction& residual_function,
     };
 
     Matrix jacobian = evaluate_jacobian(x, f);
+    bool jacobian_scale_initialized = false;
+    const auto update_jacobian_scale = [&]() {
+        if (!options.scale_from_jacobian) { return; }
+        Vector column_norms = jacobian.colwise().norm().transpose();
+        for (Eigen::Index column = 0; column < variable_count; ++column) {
+            if (!(column_norms[column] > 0.0) ||
+                !std::isfinite(column_norms[column])) {
+                column_norms[column] = 1.0;
+            }
+            inverse_scale[column] =
+                jacobian_scale_initialized
+                    ? std::max(inverse_scale[column], column_norms[column])
+                    : column_norms[column];
+        }
+        scale = inverse_scale.cwiseInverse();
+        jacobian_scale_initialized = true;
+    };
+    update_jacobian_scale();
     std::size_t steps_since_jacobian_refresh = 0;
     double cost = 0.5 * f.squaredNorm();
     Vector gradient = jacobian.transpose() * f;
@@ -749,6 +771,7 @@ TrfResult trf_least_squares(const ResidualFunction& residual_function,
             ++steps_since_jacobian_refresh;
             ++result.jacobian_updates;
         }
+        update_jacobian_scale();
         gradient = jacobian.transpose() * f;
         ++result.iterations;
 

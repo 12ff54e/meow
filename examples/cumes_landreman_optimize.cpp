@@ -33,6 +33,7 @@ using cumes_meow_example::LandremanWorkflow;
 enum class JacobianMethod {
     ANALYTIC,
     BROYDEN,
+    JACOBIAN_SCALED,
     HOT_FINITE_DIFFERENCE,
     WARM_FINITE_DIFFERENCE,
     FINITE_DIFFERENCE
@@ -41,6 +42,7 @@ enum class JacobianMethod {
 JacobianMethod parse_jacobian_method(const std::string& name) {
     if (name == "analytic") { return JacobianMethod::ANALYTIC; }
     if (name == "broyden") { return JacobianMethod::BROYDEN; }
+    if (name == "jacobian-scaled") { return JacobianMethod::JACOBIAN_SCALED; }
     if (name == "hot-finite-difference") {
         return JacobianMethod::HOT_FINITE_DIFFERENCE;
     }
@@ -51,8 +53,9 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
         return JacobianMethod::FINITE_DIFFERENCE;
     }
     throw std::invalid_argument(
-        "JACOBIAN_METHOD must be analytic, broyden, hot-finite-difference, "
-        "warm-finite-difference, or finite-difference");
+        "JACOBIAN_METHOD must be analytic, broyden, jacobian-scaled, "
+        "hot-finite-difference, warm-finite-difference, or "
+        "finite-difference");
 }
 
 const char* jacobian_method_name(JacobianMethod method) {
@@ -61,6 +64,8 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "analytic";
         case JacobianMethod::BROYDEN:
             return "broyden";
+        case JacobianMethod::JACOBIAN_SCALED:
+            return "jacobian-scaled";
         case JacobianMethod::HOT_FINITE_DIFFERENCE:
             return "hot-finite-difference";
         case JacobianMethod::WARM_FINITE_DIFFERENCE:
@@ -693,8 +698,8 @@ void print_usage() {
            "workflow. ITERATION_DIRECTORY stores the "
            "input and native equilibrium for step 0 and every accepted "
            "iteration. JACOBIAN_METHOD is finite-difference (default), "
-           "broyden, hot-finite-difference, warm-finite-difference, or "
-           "analytic.\n";
+           "broyden, jacobian-scaled, hot-finite-difference, "
+           "warm-finite-difference, or analytic.\n";
 }
 
 }  // namespace
@@ -794,6 +799,9 @@ int main(int argc, char** argv) {
                 options.jacobian_refresh_interval = 5;
                 options.broyden_min_reduction_ratio = 0.1;
                 options.broyden_max_secant_error = 0.1;
+            }
+            if (jacobian_method == JacobianMethod::JACOBIAN_SCALED) {
+                options.scale_from_jacobian = true;
             }
             if (max_evaluations == 0 && max_accepted_iterations != 0) {
                 const std::size_t evaluations_per_iteration =

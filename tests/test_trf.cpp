@@ -252,6 +252,40 @@ void test_invalid_broyden_options() {
     require(threw, "zero Broyden refresh interval was accepted");
 }
 
+void test_jacobian_column_scaling() {
+    const auto residual = [](const meow::Vector& x) {
+        return (meow::Vector(2) << 1.0e3 * (x[0] - 1.0), 1.0e-3 * (x[1] + 2.0))
+            .finished();
+    };
+    const auto jacobian = [](const meow::Vector&) {
+        return (meow::Matrix(2, 2) << 1.0e3, 0.0, 0.0, 1.0e-3).finished();
+    };
+    meow::Vector x0 = meow::Vector::Zero(2);
+    meow::TrfOptions options;
+    options.gtol = 1e-12;
+    options.scale_from_jacobian = true;
+    const meow::TrfResult result =
+        meow::trf_least_squares(residual, x0, options, jacobian);
+    require(result.success, "Jacobian-scaled problem did not converge");
+    require(std::abs(result.x[0] - 1.0) < 1e-10 &&
+                std::abs(result.x[1] + 2.0) < 1e-10,
+            "Jacobian-scaled solution is wrong");
+}
+
+void test_conflicting_scaling_options() {
+    const auto residual = [](const meow::Vector& x) { return x; };
+    meow::Vector x0(1);
+    x0 << 1.0;
+    meow::TrfOptions options;
+    options.x_scale = meow::Vector::Ones(1);
+    options.scale_from_jacobian = true;
+    bool threw = false;
+    try {
+        static_cast<void>(meow::trf_least_squares(residual, x0, options));
+    } catch (const std::invalid_argument&) { threw = true; }
+    require(threw, "conflicting TRF scaling policies were accepted");
+}
+
 }  // namespace
 
 int main() {
@@ -266,6 +300,8 @@ int main() {
         test_absolute_and_relative_finite_difference_steps();
         test_safeguarded_broyden_updates();
         test_invalid_broyden_options();
+        test_jacobian_column_scaling();
+        test_conflicting_scaling_options();
     } catch (const std::exception& error) {
         std::cerr << "test_trf: " << error.what() << '\n';
         return 1;

@@ -64,6 +64,11 @@ struct TrfOptions {
     // Positive characteristic scales for x. An empty vector means all ones.
     Vector x_scale;
 
+    // Derive characteristic variable scales from reciprocal Jacobian column
+    // norms, following the standard iterative least-squares scaling rule.
+    // This option and an explicit x_scale are mutually exclusive.
+    bool scale_from_jacobian = false;
+
     // One preserves the default behavior of rebuilding the Jacobian after
     // every accepted step. Values above one permit good-Broyden secant
     // updates between exact rebuilds. A rebuild is forced earlier when the
