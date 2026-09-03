@@ -1019,6 +1019,22 @@ therefore proceed to complete construction. Diagnostics are under
 `../tmp/parallel-fd-check-coordinated`; mode-1 artifacts are under
 `../tmp/parallel-fd-mode1`.
 
+If the complete two-worker runs preserve their endpoints and timing advantage,
+the next experiment will combine that orthogonal throughput improvement with
+aggressive Broyden reuse. Exact refreshes will use the same two-worker cold
+finite-difference callback, while accepted secant updates and all safeguards
+remain unchanged. Mode-1 QA/QH must reproduce the aggressive-Broyden
+trajectory and improve its wall time before complete constructions are run.
+
+The following independent experiment will keep every accepted-center
+equilibrium at the qualified tolerance but relax only the perturbed
+finite-difference solves. A one-Jacobian QA/QH diagnostic will compare each
+column with the qualified cold Jacobian and report Frobenius and worst-column
+errors at candidate tolerances. Optimization is permitted only if the error is
+small enough to preserve mode-1 objective quality. This isolates cheaper
+derivative sampling from the unsuccessful two-accuracy approach, which repeated
+the whole optimizer trajectory at two tolerances.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
