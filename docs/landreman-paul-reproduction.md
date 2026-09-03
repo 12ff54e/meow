@@ -767,6 +767,37 @@ qualification may Jacobian scaling be combined with safeguarded Broyden reuse.
 Artifacts belong under `../tmp/jacobian-scale-smoke` and, if promoted to full
 construction, `../benchmark-jacobian-scale-20260904`.
 
+### Further optimizer-performance experiment plan
+
+The performance investigation will continue after Broyden and scaling. Each
+candidate stays opt-in until both QA and QH have been checked, and every timed
+comparison records the final full-accuracy objective as well as wall time,
+equilibrium evaluations, and nonlinear iterations. The experiments are
+ordered to preserve a useful control for each additional change:
+
+1. If standalone Jacobian scaling reaches a competitive full-construction
+   endpoint, combine it with the already qualified safeguarded Broyden reuse.
+   First run complete mode-1 QA/QH checks, then full constructions only when
+   objective and equilibrium-validity gates pass.
+2. Measure a two-accuracy equilibrium schedule. Optimize initially with a
+   relaxed cuMES force tolerance, then always polish the same stage at the
+   qualified `1e-12` tolerance and use only that full-accuracy state for stage
+   continuation and final reporting. Tolerance scheduling is an optimizer
+   policy in meow; cuMES continues to solve the request it receives.
+3. Revisit restart acceleration without carrying the full lambda state. A
+   candidate restart may reuse physical geometry while rebuilding or
+   canonicalizing the lambda gauge; it must pass direct residual/Jacobian
+   comparisons before timing because the full-state restart already selected
+   a different weak branch.
+4. If the preceding methods leave substantial exact-Jacobian cost, test more
+   aggressive secant refresh policies on isolated late stages before full
+   runs. Reject policies that save evaluations only by terminating at a worse
+   full-accuracy objective.
+
+Generated data remains outside the repositories under dated sibling `tmp/`
+or benchmark directories. A negative result is retained in this document so
+that it is not silently promoted or repeated.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
