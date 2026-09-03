@@ -952,6 +952,23 @@ The aggressive policy is 1.71x faster than conservative Broyden for QA and
 respectively, so both cases proceed to complete construction. Preliminary
 artifacts are under `../tmp/aggressive-broyden-mode1`.
 
+The complete QA construction also passed. Aggressive Broyden took 1,209.77 s,
+a 1.102x speedup over conservative Broyden (1,333.45 s) and 1.271x over cold
+finite differences (1,537.26 s). Its final objective `4.09894575473e-7` is
+19.6% below conservative Broyden and 31.1% below cold. Across the four stages
+it accepted 35 secant updates and made 42 refresh decisions:
+
+| mode | steps | secant updates | equilibrium evaluations | nonlinear iterations | objective |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 19 | 14 | 88 | 97,903 | `9.62613573366e-3` |
+| 2 | 21 | 10 | 349 | 697,034 | `1.41588197208e-4` |
+| 3 | 26 | 8 | 972 | 2,069,901 | `3.54184637937e-6` |
+| 4 | 11 | 3 | 763 | 1,669,206 | `4.09894575473e-7` |
+
+The complete QA artifacts are under
+`../benchmark-aggressive-broyden-20260904/qa`. QH remains an independent
+full-construction gate.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
