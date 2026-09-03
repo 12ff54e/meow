@@ -100,18 +100,21 @@ build-cumes/cumes_landreman_optimize \
 
 The optional final `JACOBIAN_METHOD` argument selects `finite-difference` (the
 qualified default), `broyden`, `aggressive-broyden`, `hot-finite-difference`,
-`parallel-aggressive-broyden`, `warm-finite-difference`, `jacobian-scaled`,
-`two-accuracy`,
+`parallel-aggressive-broyden`, `four-worker-aggressive-broyden`,
+`warm-finite-difference`, `jacobian-scaled`, `two-accuracy`,
 `two-accuracy-broyden`, `geometry-restart-finite-difference`,
 `geometry-restart-check`, `parallel-finite-difference`,
 `parallel-finite-difference-check`,
-`relaxed-parallel-finite-difference-check`, or `analytic`.
+`relaxed-parallel-finite-difference-check`, `parallel-worker-count-check`, or
+`analytic`.
 The non-default methods are experimental. `broyden` uses cold finite-difference
 Jacobian refreshes with safeguarded good-Broyden updates between them.
 `aggressive-broyden` permits an eight-step Jacobian age, a 0.05 minimum trust
 ratio, and a 0.5 maximum relative secant defect for controlled comparisons.
 `parallel-aggressive-broyden` uses those same safeguards while evaluating each
 exact cold refresh with the two-worker callback.
+`four-worker-aggressive-broyden` uses the same policy with four independent
+column workers; the two-worker selector remains available for reproducibility.
 `jacobian-scaled` continues to refresh cold Jacobians on every accepted step
 but derives variable scales from their column norms.
 `two-accuracy` first optimizes each boundary-mode stage with a relaxed
@@ -131,6 +134,9 @@ the concurrent and serial matrices directly before timing an optimization.
 `relaxed-parallel-finite-difference-check` instead solves only the perturbed
 columns at tolerance `2e-12` and compares them with the qualified cold matrix;
 it is diagnostic-only until that derivative-accuracy gate passes.
+`parallel-worker-count-check` times qualified serial, two-worker, and
+four-worker Jacobians at the selected stage and checks both concurrent matrices
+against the serial result.
 `hot-finite-difference` retains its historical `1e-4` step floor, while
 `warm-finite-difference` uses the qualified case-specific step exactly and
 also initializes trust-region trials from the last accepted equilibrium.

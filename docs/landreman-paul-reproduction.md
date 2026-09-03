@@ -1141,6 +1141,16 @@ single-Jacobian wall-time improvement; otherwise two remains the qualified
 default. This tests available device concurrency without changing any
 optimization mathematics.
 
+Both mode-1 diagnostics passed bit-exactly. QA took 2.829 s serial, 1.263 s
+with two workers, and 0.867 s with four; the four-worker callback is 1.457x
+faster than two workers. QH took 2.282 s, 1.035 s, and 0.735 s respectively,
+a further 1.408x speedup. Both concurrent matrices had zero Frobenius
+difference from the serial matrix, and peak process RSS stayed below 198 MB.
+A separate four-worker aggressive-Broyden selector will now be gated on
+complete mode-1 QA/QH optimizations before any full construction. The
+two-worker selector remains unchanged for reproducibility. Diagnostic
+artifacts are under `../tmp/parallel-worker-count-check`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies

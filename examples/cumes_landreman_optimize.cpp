@@ -38,6 +38,7 @@ enum class JacobianMethod {
     BROYDEN,
     AGGRESSIVE_BROYDEN,
     PARALLEL_AGGRESSIVE_BROYDEN,
+    FOUR_WORKER_AGGRESSIVE_BROYDEN,
     JACOBIAN_SCALED,
     TWO_ACCURACY,
     TWO_ACCURACY_BROYDEN,
@@ -45,6 +46,7 @@ enum class JacobianMethod {
     GEOMETRY_RESTART_FINITE_DIFFERENCE,
     PARALLEL_FINITE_DIFFERENCE_CHECK,
     RELAXED_PARALLEL_FINITE_DIFFERENCE_CHECK,
+    PARALLEL_WORKER_COUNT_CHECK,
     PARALLEL_FINITE_DIFFERENCE,
     HOT_FINITE_DIFFERENCE,
     WARM_FINITE_DIFFERENCE,
@@ -59,6 +61,9 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     }
     if (name == "parallel-aggressive-broyden") {
         return JacobianMethod::PARALLEL_AGGRESSIVE_BROYDEN;
+    }
+    if (name == "four-worker-aggressive-broyden") {
+        return JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN;
     }
     if (name == "jacobian-scaled") { return JacobianMethod::JACOBIAN_SCALED; }
     if (name == "two-accuracy") { return JacobianMethod::TWO_ACCURACY; }
@@ -77,6 +82,9 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     if (name == "relaxed-parallel-finite-difference-check") {
         return JacobianMethod::RELAXED_PARALLEL_FINITE_DIFFERENCE_CHECK;
     }
+    if (name == "parallel-worker-count-check") {
+        return JacobianMethod::PARALLEL_WORKER_COUNT_CHECK;
+    }
     if (name == "parallel-finite-difference") {
         return JacobianMethod::PARALLEL_FINITE_DIFFERENCE;
     }
@@ -92,11 +100,13 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     throw std::invalid_argument(
         "JACOBIAN_METHOD must be analytic, broyden, aggressive-broyden, "
         "parallel-aggressive-broyden, "
+        "four-worker-aggressive-broyden, "
         "jacobian-scaled, "
         "two-accuracy, two-accuracy-broyden, geometry-restart-check, "
         "geometry-restart-finite-difference, "
         "parallel-finite-difference-check, "
         "relaxed-parallel-finite-difference-check, "
+        "parallel-worker-count-check, "
         "parallel-finite-difference, "
         "hot-finite-difference, warm-finite-difference, or "
         "finite-difference");
@@ -112,6 +122,8 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "aggressive-broyden";
         case JacobianMethod::PARALLEL_AGGRESSIVE_BROYDEN:
             return "parallel-aggressive-broyden";
+        case JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN:
+            return "four-worker-aggressive-broyden";
         case JacobianMethod::JACOBIAN_SCALED:
             return "jacobian-scaled";
         case JacobianMethod::TWO_ACCURACY:
@@ -126,6 +138,8 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "parallel-finite-difference-check";
         case JacobianMethod::RELAXED_PARALLEL_FINITE_DIFFERENCE_CHECK:
             return "relaxed-parallel-finite-difference-check";
+        case JacobianMethod::PARALLEL_WORKER_COUNT_CHECK:
+            return "parallel-worker-count-check";
         case JacobianMethod::PARALLEL_FINITE_DIFFERENCE:
             return "parallel-finite-difference";
         case JacobianMethod::HOT_FINITE_DIFFERENCE:
@@ -608,7 +622,12 @@ class LandremanResidual {
 
     meow::Matrix parallel_finite_difference_jacobian(
         const meow::Vector& x,
-        std::optional<double> relaxed_tolerance = std::nullopt) {
+        std::optional<double> relaxed_tolerance = std::nullopt,
+        std::size_t worker_count = 2) {
+        if (worker_count == 0) {
+            throw std::invalid_argument(
+                "parallel Jacobian worker count must be positive");
+        }
         static_cast<void>((*this)(x));
         if (!cached_outcome_.has_value()) {
             throw std::runtime_error(
@@ -621,9 +640,9 @@ class LandremanResidual {
             cumes_meow_example::landreman_finite_difference_policy(selection_);
         std::size_t jacobian_nonlinear_iterations = 0;
 
-        for (Eigen::Index first = 0; first < x.size(); first += 2) {
-            const Eigen::Index batch_size =
-                std::min<Eigen::Index>(2, x.size() - first);
+        const Eigen::Index workers = static_cast<Eigen::Index>(worker_count);
+        for (Eigen::Index first = 0; first < x.size(); first += workers) {
+            const Eigen::Index batch_size = std::min(workers, x.size() - first);
             std::vector<std::future<cumes::SolveOutcome>> futures;
             std::vector<double> steps;
             futures.reserve(static_cast<std::size_t>(batch_size));
@@ -714,8 +733,8 @@ class LandremanResidual {
         ++parallel_jacobian_evaluations_;
         std::cout << "parallel_finite_difference_jacobian columns="
                   << result.cols() << " residuals=" << result.rows()
-                  << " workers=2 nonlinear_iterations="
-                  << jacobian_nonlinear_iterations
+                  << " workers=" << worker_count
+                  << " nonlinear_iterations=" << jacobian_nonlinear_iterations
                   << " relaxed_tolerance=" << relaxed_tolerance.value_or(0.0)
                   << " wall_seconds=" << wall_seconds << '\n';
         return result;
@@ -724,6 +743,10 @@ class LandremanResidual {
     meow::Matrix relaxed_parallel_finite_difference_jacobian(
         const meow::Vector& x) {
         return parallel_finite_difference_jacobian(x, 2.0e-12);
+    }
+
+    meow::Matrix four_worker_finite_difference_jacobian(const meow::Vector& x) {
+        return parallel_finite_difference_jacobian(x, std::nullopt, 4);
     }
 
     std::size_t equilibrium_evaluations() const { return evaluation_count_; }
@@ -966,11 +989,13 @@ void print_usage() {
            "input and native equilibrium for step 0 and every accepted "
            "iteration. JACOBIAN_METHOD is finite-difference (default), "
            "broyden, aggressive-broyden, parallel-aggressive-broyden, "
+           "four-worker-aggressive-broyden, "
            "jacobian-scaled, two-accuracy, "
            "two-accuracy-broyden, geometry-restart-check, "
            "geometry-restart-finite-difference, hot-finite-difference, "
            "parallel-finite-difference-check, parallel-finite-difference, "
            "relaxed-parallel-finite-difference-check, "
+           "parallel-worker-count-check, "
            "warm-finite-difference, or analytic.\n";
 }
 
@@ -1103,7 +1128,9 @@ int main(int argc, char** argv) {
                 }
                 if (jacobian_method == JacobianMethod::AGGRESSIVE_BROYDEN ||
                     jacobian_method ==
-                        JacobianMethod::PARALLEL_AGGRESSIVE_BROYDEN) {
+                        JacobianMethod::PARALLEL_AGGRESSIVE_BROYDEN ||
+                    jacobian_method ==
+                        JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN) {
                     options.jacobian_refresh_interval = 8;
                     options.broyden_min_reduction_ratio = 0.05;
                     options.broyden_max_secant_error = 0.5;
@@ -1312,6 +1339,33 @@ int main(int argc, char** argv) {
                     result.status = meow::TrfStatus::USER_STOPPED;
                     result.message =
                         "Relaxed parallel Jacobian comparison completed.";
+                } else if (jacobian_method ==
+                           JacobianMethod::PARALLEL_WORKER_COUNT_CHECK) {
+                    const meow::Matrix cold =
+                        residual.cold_finite_difference_jacobian(initial);
+                    const meow::Matrix two_workers =
+                        residual.parallel_finite_difference_jacobian(initial);
+                    meow::Matrix four_workers =
+                        residual.four_worker_finite_difference_jacobian(
+                            initial);
+                    std::cout
+                        << "parallel_worker_comparison "
+                        << "two_relative_frobenius_error="
+                        << (two_workers - cold).norm() / cold.norm()
+                        << " four_relative_frobenius_error="
+                        << (four_workers - cold).norm() / cold.norm()
+                        << " two_four_relative_frobenius_difference="
+                        << (four_workers - two_workers).norm() / cold.norm()
+                        << '\n';
+                    result.x = initial;
+                    result.residual = residual(initial);
+                    result.jacobian = std::move(four_workers);
+                    result.gradient =
+                        result.jacobian.transpose() * result.residual;
+                    result.cost = 0.5 * result.residual.squaredNorm();
+                    result.status = meow::TrfStatus::USER_STOPPED;
+                    result.message =
+                        "Parallel worker-count comparison completed.";
                 } else if (jacobian_method == JacobianMethod::ANALYTIC) {
                     result = meow::trf_least_squares(
                         std::ref(residual), initial, options,
@@ -1348,6 +1402,14 @@ int main(int argc, char** argv) {
                         [&](const meow::Vector& x) {
                             return residual.parallel_finite_difference_jacobian(
                                 x);
+                        });
+                } else if (jacobian_method ==
+                           JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN) {
+                    result = meow::trf_least_squares(
+                        std::ref(residual), initial, options,
+                        [&](const meow::Vector& x) {
+                            return residual
+                                .four_worker_finite_difference_jacobian(x);
                         });
                 } else {
                     result = meow::trf_least_squares(std::ref(residual),
