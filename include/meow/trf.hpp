@@ -35,6 +35,7 @@ struct IterationInfo {
     std::size_t iteration = 0;
     std::size_t function_evaluations = 0;
     std::size_t jacobian_evaluations = 0;
+    std::size_t jacobian_updates = 0;
     double cost = 0.0;
     double optimality = 0.0;
     double trust_radius = 0.0;
@@ -63,6 +64,15 @@ struct TrfOptions {
     // Positive characteristic scales for x. An empty vector means all ones.
     Vector x_scale;
 
+    // One preserves the default behavior of rebuilding the Jacobian after
+    // every accepted step. Values above one permit good-Broyden secant
+    // updates between exact rebuilds. A rebuild is forced earlier when the
+    // trust-region reduction ratio or relative secant defect crosses the
+    // safeguards below.
+    std::size_t jacobian_refresh_interval = 1;
+    double broyden_min_reduction_ratio = 0.1;
+    double broyden_max_secant_error = 0.5;
+
     // Called after each accepted iteration. Return false to stop cleanly.
     IterationCallback callback;
     int verbose = 0;
@@ -79,6 +89,7 @@ struct TrfResult {
     double optimality = std::numeric_limits<double>::quiet_NaN();
     std::size_t function_evaluations = 0;
     std::size_t jacobian_evaluations = 0;
+    std::size_t jacobian_updates = 0;
     std::size_t iterations = 0;
     TrfStatus status = TrfStatus::MAX_FUNCTION_EVALUATIONS;
     bool success = false;

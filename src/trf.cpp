@@ -462,6 +462,17 @@ void validate_inputs(const ResidualFunction& residual,
         throw std::invalid_argument(
             "TRF x_scale entries must be positive and finite");
     }
+    if (options.jacobian_refresh_interval == 0) {
+        throw std::invalid_argument(
+            "TRF Jacobian refresh interval must be positive");
+    }
+    if (!std::isfinite(options.broyden_min_reduction_ratio) ||
+        options.broyden_min_reduction_ratio < 0.0 ||
+        !std::isfinite(options.broyden_max_secant_error) ||
+        options.broyden_max_secant_error < 0.0) {
+        throw std::invalid_argument(
+            "TRF Broyden safeguards must be finite and nonnegative");
+    }
 }
 
 }  // namespace
@@ -571,6 +582,7 @@ TrfResult trf_least_squares(const ResidualFunction& residual_function,
     };
 
     Matrix jacobian = evaluate_jacobian(x, f);
+    std::size_t steps_since_jacobian_refresh = 0;
     double cost = 0.5 * f.squaredNorm();
     Vector gradient = jacobian.transpose() * f;
 
@@ -698,10 +710,38 @@ TrfResult trf_least_squares(const ResidualFunction& residual_function,
 
         const TrfStatus tolerance_status = termination_status(
             actual_reduction, cost, step_norm, x.norm(), ratio, options);
+        const Vector accepted_step = accepted_x - x;
+        const Vector residual_change = accepted_f - f;
+        const Vector secant_correction =
+            residual_change - jacobian * accepted_step;
+        const double secant_scale =
+            std::max(residual_change.norm(),
+                     EPSILON * (1.0 + f.norm() + accepted_f.norm()));
+        const double relative_secant_error =
+            secant_correction.norm() / secant_scale;
+        const double step_squared_norm = accepted_step.squaredNorm();
+        const bool valid_broyden_update = step_squared_norm > 0.0 &&
+                                          std::isfinite(step_squared_norm) &&
+                                          std::isfinite(relative_secant_error);
+        const bool refresh_jacobian =
+            options.jacobian_refresh_interval == 1 ||
+            steps_since_jacobian_refresh + 1 >=
+                options.jacobian_refresh_interval ||
+            ratio < options.broyden_min_reduction_ratio ||
+            relative_secant_error > options.broyden_max_secant_error ||
+            !valid_broyden_update;
         x = std::move(accepted_x);
         f = std::move(accepted_f);
         cost = accepted_cost;
-        jacobian = evaluate_jacobian(x, f);
+        if (refresh_jacobian) {
+            jacobian = evaluate_jacobian(x, f);
+            steps_since_jacobian_refresh = 0;
+        } else {
+            jacobian.noalias() += secant_correction *
+                                  accepted_step.transpose() / step_squared_norm;
+            ++steps_since_jacobian_refresh;
+            ++result.jacobian_updates;
+        }
         gradient = jacobian.transpose() * f;
         ++result.iterations;
 
@@ -712,6 +752,7 @@ TrfResult trf_least_squares(const ResidualFunction& residual_function,
                 result.iterations,
                 result.function_evaluations,
                 result.jacobian_evaluations,
+                result.jacobian_updates,
                 cost,
                 infinity_norm(gradient.cwiseProduct(callback_scaling.v)),
                 trust_radius,

@@ -32,6 +32,7 @@ using cumes_meow_example::LandremanWorkflow;
 
 enum class JacobianMethod {
     ANALYTIC,
+    BROYDEN,
     HOT_FINITE_DIFFERENCE,
     WARM_FINITE_DIFFERENCE,
     FINITE_DIFFERENCE
@@ -39,6 +40,7 @@ enum class JacobianMethod {
 
 JacobianMethod parse_jacobian_method(const std::string& name) {
     if (name == "analytic") { return JacobianMethod::ANALYTIC; }
+    if (name == "broyden") { return JacobianMethod::BROYDEN; }
     if (name == "hot-finite-difference") {
         return JacobianMethod::HOT_FINITE_DIFFERENCE;
     }
@@ -49,7 +51,7 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
         return JacobianMethod::FINITE_DIFFERENCE;
     }
     throw std::invalid_argument(
-        "JACOBIAN_METHOD must be analytic, hot-finite-difference, "
+        "JACOBIAN_METHOD must be analytic, broyden, hot-finite-difference, "
         "warm-finite-difference, or finite-difference");
 }
 
@@ -57,6 +59,8 @@ const char* jacobian_method_name(JacobianMethod method) {
     switch (method) {
         case JacobianMethod::ANALYTIC:
             return "analytic";
+        case JacobianMethod::BROYDEN:
+            return "broyden";
         case JacobianMethod::HOT_FINITE_DIFFERENCE:
             return "hot-finite-difference";
         case JacobianMethod::WARM_FINITE_DIFFERENCE:
@@ -689,7 +693,8 @@ void print_usage() {
            "workflow. ITERATION_DIRECTORY stores the "
            "input and native equilibrium for step 0 and every accepted "
            "iteration. JACOBIAN_METHOD is finite-difference (default), "
-           "hot-finite-difference, warm-finite-difference, or analytic.\n";
+           "broyden, hot-finite-difference, warm-finite-difference, or "
+           "analytic.\n";
 }
 
 }  // namespace
@@ -785,6 +790,11 @@ int main(int argc, char** argv) {
             options.finite_difference_absolute_step =
                 finite_difference.absolute_step;
             options.max_function_evaluations = max_evaluations;
+            if (jacobian_method == JacobianMethod::BROYDEN) {
+                options.jacobian_refresh_interval = 5;
+                options.broyden_min_reduction_ratio = 0.1;
+                options.broyden_max_secant_error = 0.5;
+            }
             if (max_evaluations == 0 && max_accepted_iterations != 0) {
                 const std::size_t evaluations_per_iteration =
                     2 * (boundary.size() + 2);
@@ -865,6 +875,7 @@ int main(int argc, char** argv) {
                       << " objective=" << 2.0 * result.cost
                       << " evaluations=" << result.function_evaluations
                       << " iterations=" << result.iterations
+                      << " jacobian_updates=" << result.jacobian_updates
                       << " equilibrium_evaluations="
                       << residual.equilibrium_evaluations()
                       << " nonlinear_iterations="

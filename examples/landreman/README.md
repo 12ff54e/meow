@@ -99,8 +99,10 @@ build-cumes/cumes_landreman_optimize \
 ```
 
 The optional final `JACOBIAN_METHOD` argument selects `finite-difference` (the
-qualified default), `hot-finite-difference`, `warm-finite-difference`, or
-`analytic`. The non-default methods are experimental.
+qualified default), `broyden`, `hot-finite-difference`,
+`warm-finite-difference`, or `analytic`. The non-default methods are
+experimental. `broyden` uses cold finite-difference Jacobian refreshes with
+safeguarded good-Broyden updates between them.
 `hot-finite-difference` retains its historical `1e-4` step floor, while
 `warm-finite-difference` uses the qualified case-specific step exactly and
 also initializes trust-region trials from the last accepted equilibrium.

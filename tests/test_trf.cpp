@@ -205,6 +205,53 @@ void test_absolute_and_relative_finite_difference_steps() {
             "relative finite-difference step was not used");
 }
 
+void test_safeguarded_broyden_updates() {
+    const auto residual = [](const meow::Vector& x) {
+        return (meow::Vector(2) << x[0] * x[0] - 4.0, 0.5 * x[0] - 1.0)
+            .finished();
+    };
+    std::size_t exact_jacobians = 0;
+    const auto jacobian = [&exact_jacobians](const meow::Vector& x) {
+        ++exact_jacobians;
+        return (meow::Matrix(2, 1) << 2.0 * x[0], 0.5).finished();
+    };
+    meow::Vector x0(1);
+    x0 << 0.5;
+    meow::TrfOptions options;
+    options.gtol = 1e-11;
+    options.ftol = 1e-12;
+    options.xtol = 1e-12;
+    options.jacobian_refresh_interval = 4;
+    options.broyden_min_reduction_ratio = 0.0;
+    options.broyden_max_secant_error = 10.0;
+
+    const meow::TrfResult result =
+        meow::trf_least_squares(residual, x0, options, jacobian);
+    require(result.success, "Broyden-updated problem did not converge");
+    require(std::abs(result.x[0] - 2.0) < 1e-7,
+            "Broyden-updated solution is wrong");
+    require(result.jacobian_updates > 0,
+            "Broyden path did not perform a secant update");
+    require(result.jacobian_evaluations == exact_jacobians,
+            "exact Broyden refresh count is inconsistent");
+    require(result.jacobian_evaluations + result.jacobian_updates ==
+                result.iterations + 1,
+            "each Broyden iteration must update or rebuild its Jacobian");
+}
+
+void test_invalid_broyden_options() {
+    const auto residual = [](const meow::Vector& x) { return x; };
+    meow::Vector x0(1);
+    x0 << 1.0;
+    meow::TrfOptions options;
+    options.jacobian_refresh_interval = 0;
+    bool threw = false;
+    try {
+        static_cast<void>(meow::trf_least_squares(residual, x0, options));
+    } catch (const std::invalid_argument&) { threw = true; }
+    require(threw, "zero Broyden refresh interval was accepted");
+}
+
 }  // namespace
 
 int main() {
@@ -217,6 +264,8 @@ int main() {
         test_rank_deficient_problem();
         test_invalid_bounds();
         test_absolute_and_relative_finite_difference_steps();
+        test_safeguarded_broyden_updates();
+        test_invalid_broyden_options();
     } catch (const std::exception& error) {
         std::cerr << "test_trf: " << error.what() << '\n';
         return 1;
