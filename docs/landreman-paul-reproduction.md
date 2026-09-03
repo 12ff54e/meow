@@ -882,6 +882,22 @@ polished objectives with a timing win proceed to complete constructions.
 The complete uncapped QA artifacts are under
 `../benchmark-two-accuracy-20260904/qa`.
 
+The fixed six-step cap failed its first mode-1 QA gate. The relaxed phase took
+six steps and 26,567 nonlinear iterations, but the cold Broyden polish then
+needed 31 steps, 297 equilibrium evaluations, and 367,766 nonlinear
+iterations. Total wall time was 81.44 s, slower than the 53.39 s cold control,
+even though the objective `9.6219340894e-3` was valid. Only three of the 31
+polish steps passed the conservative secant safeguards. No QH run was made
+for this rejected fixed-cap rule.
+
+The next cap is based on measured progress instead of stage count: after at
+least eight relaxed steps, switch to polishing when the cumulative objective
+improvement over the latest three accepted steps is below 1%. On the uncapped
+QA trace this retains all useful mode-1 and mode-3 progress, trims the final
+two mode-2 steps, and removes nine plateau steps from mode 4. The qualified
+polish retains safeguarded Broyden reuse. The rejected fixed-cap artifacts are
+under `../tmp/two-accuracy-broyden-mode1`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
