@@ -997,6 +997,28 @@ mode-1 QA/QH optimizations be compared with the serial cold controls. This
 policy remains in meow; no concurrency or optimizer knowledge is added to
 cuMES.
 
+The QH diagnostic initially found that a multigrid device fence could collide
+with another thread's CUDA graph capture. cuMES now serializes only capture
+and that stage-transition fence; graph execution and solver hot loops still
+overlap. Its new concurrent W7-X public-API regression and all 96 cuMES tests
+pass. Serial and concurrent Jacobians are bit-identical for QA and QH. The
+focused timings were 2.823 s serial versus 1.247 s concurrent for QA (2.26x),
+and 2.250 s versus 1.025 s for QH (2.20x).
+
+Complete mode-1 optimizations also preserved the serial trajectory exactly:
+
+| case | path | wall time (s) | speed / serial | objective |
+| --- | --- | ---: | ---: | ---: |
+| QA | two-worker cold finite difference | 33.81 | 1.579x | `9.62220283167e-3` |
+| QA | serial cold finite difference | 53.39 | 1.000x | `9.62220283167e-3` |
+| QH | two-worker cold finite difference | 38.57 | 1.579x | `0.140503531818` |
+| QH | serial cold finite difference | 60.92 | 1.000x | `0.140503531818` |
+
+Peak process RSS was 194,444 KiB for QA and 192,212 KiB for QH. Both cases
+therefore proceed to complete construction. Diagnostics are under
+`../tmp/parallel-fd-check-coordinated`; mode-1 artifacts are under
+`../tmp/parallel-fd-mode1`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
