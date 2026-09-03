@@ -969,6 +969,34 @@ The complete QA artifacts are under
 `../benchmark-aggressive-broyden-20260904/qa`. QH remains an independent
 full-construction gate.
 
+The complete QH construction took 2,681.44 s, a 1.125x speedup over
+conservative Broyden (3,016.60 s) and 1.217x over cold finite differences
+(3,262.78 s). Its final objective `3.99555777572e-5` is 4.0% higher than
+conservative Broyden but 25.6% lower than cold. The aggressive policy is
+therefore a useful speed/quality option, especially for QA, but it does not
+strictly dominate the conservative QH endpoint. QH used 3,581 equilibrium
+evaluations and 10,036,912 nonlinear iterations, down from 3,979 and
+11,052,763 for conservative Broyden. Complete artifacts are under
+`../benchmark-aggressive-broyden-20260904/{qa,qh}`.
+
+### Concurrent finite-difference experiment plan
+
+The next experiment is orthogonal to secant reuse. Cold finite-difference
+columns are independent, while a single cuMES solve leaves a small amount of
+GPU and host-orchestration headroom. Meow will add an opt-in two-worker
+Jacobian callback that runs two complete cold cuMES solves concurrently, each
+with its own solver instance and no shared mutable equilibrium state. It will
+not change difference steps, target evaluation, tolerances, or the accepted
+center equilibrium.
+
+Before optimization, serial and concurrent mode-1 Jacobians must agree to
+floating-point roundoff column by column and every equilibrium must pass the
+same validity gates. A timed single-Jacobian comparison must show positive
+throughput scaling without excessive GPU-memory growth. Only then will
+mode-1 QA/QH optimizations be compared with the serial cold controls. This
+policy remains in meow; no concurrency or optimizer knowledge is added to
+cuMES.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
