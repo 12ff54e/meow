@@ -1052,6 +1052,19 @@ finite-difference callback, while accepted secant updates and all safeguards
 remain unchanged. Mode-1 QA/QH must reproduce the aggressive-Broyden
 trajectory and improve its wall time before complete constructions are run.
 
+Both combined mode-1 gates passed and reproduced the serial
+aggressive-Broyden endpoints exactly:
+
+| case | parallel aggressive (s) | serial aggressive (s) | speedup | objective |
+| --- | ---: | ---: | ---: | ---: |
+| QA | 15.25 | 20.38 | 1.336x | `9.62613573366e-3` |
+| QH | 19.80 | 25.33 | 1.279x | `0.140522858798` |
+
+QA used 83 equilibrium evaluations and 92,495 nonlinear iterations; QH used
+94 and 113,185. Each made six parallel exact refreshes and retained 14 QA / 25
+QH secant updates. Both therefore proceed to complete construction. Mode-1
+artifacts are under `../tmp/parallel-aggressive-broyden-mode1`.
+
 The following independent experiment will keep every accepted-center
 equilibrium at the qualified tolerance but relax only the perturbed
 finite-difference solves. A one-Jacobian QA/QH diagnostic will compare each
