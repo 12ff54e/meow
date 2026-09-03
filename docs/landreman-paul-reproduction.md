@@ -600,6 +600,75 @@ zeroing lambda or changing the target would destroy the observed physical
 cancellation. The complete diagnostic is
 `../tmp/lambda-isolation/qh-mode1-fields-final.log`.
 
+### Constraint-tangent wiring correction and repeated benchmark
+
+The branch investigation first exposed a concrete cuMES implementation defect,
+not a missing lambda gauge condition. The dual inverse transform produced the
+constraint fields `rCon` and `zCon` into tangent-owned buffers, but the
+subsequent `ConstraintOperator` read separate internal buffers that had never
+received those values. The nonlinear equilibrium path already connected these
+views correctly. cuMES commit `8c61395` connects the dual transform directly to
+the constraint views and removes the unused buffers; commit `f1a3ed7` also
+initializes the dual de-aliasing axis scratch discovered by Compute Sanitizer.
+The complete cuMES suite passes 96/96 tests, including sanitizer wrappers, and
+meow passes 10/10 tests against the corrected installed library.
+
+This result also clarifies why lambda appears in the equilibrium Jacobian even
+though the QS scalar has no explicit lambda term. If the converged equilibrium
+is `F(u,x)=0`, for state `u=(R,Z,lambda)` and boundary variables `x`, the
+optimizer needs
+
+```text
+du/dx = -F_u^-1 F_x
+dT/dx = T_x + T_u du/dx.
+```
+
+A pure coordinated relabelling must vanish in the physical target after the
+second line is applied. A general lambda harmonic with `R` and `Z` held fixed,
+however, is not such a relabelling: it changes the straight-field-line mapping
+and the field components used by `F`. Removing lambda from `F_u` would alter
+the coupled `R/Z` response rather than enforce target invariance. The two
+stored zero-basis lambda directions still materialize to exactly zero through
+the public equilibrium and target bridge.
+
+After the wiring correction, the centered Solovev restart oracle differs from
+the implicit response by 0.228% in aggregate spectral state and 0.514% in the
+published fields. At the harder QH mode-1 start, target-residual columns differ
+by 2.95--11.68%, while the hybrid objective directional derivative differs by
+at most 0.705%. Tightening the relative GMRES tolerance from `5e-6` to `1e-8`
+still leaves a 7.77% worst target-column difference. The remaining response is
+therefore not qualified by the 1% column gate, but the corrected one-step smoke
+trajectories improve substantially:
+
+| case | mode objectives after one accepted step per stage |
+| --- | --- |
+| QA | `1.17642 -> 0.25383 -> 0.11965 -> 0.06565 -> 0.05646` |
+| QH | `10.57197 -> 4.43401 -> 0.69221 -> 0.17152 -> 0.13730 -> 0.02254` |
+
+Fresh full-convergence runs then used cuMES `f1a3ed7`, meow `fc7e66b`, the
+same TITAN Xp, analytic starting boundaries, targets, stage schedule, and cold
+finite-difference controls recorded above. All stages stopped normally by
+`ftol` or `xtol`:
+
+| case | Jacobian | wall time (s) | speed / cold | final objective | objective / cold |
+| --- | --- | ---: | ---: | ---: | ---: |
+| QA | corrected equilibrium tangent | 2628.35 | 0.585x | `1.34526695087e-6` | 2.26x |
+| QA | cold finite difference | 1537.26 | 1.000x | `5.94683530877e-7` | 1.00x |
+| QH | corrected equilibrium tangent | 3516.16 | 0.928x | `9.71167722426e-5` | 1.81x |
+| QH | cold finite difference | 3262.78 | 1.000x | `5.36939265810e-5` | 1.00x |
+
+The corrected tangent reduces the earlier tangent endpoint by factors of 468
+for QA and 13.2 for QH, but it is 1.71 times slower than the QA cold control
+and 1.08 times slower than the QH cold control. Since the endpoints also do not
+match the finite-difference objectives, there remains **no qualified analytic
+Jacobian speedup**. The default remains `finite-difference`; `analytic` remains
+experimental. Complete corrected logs, result JSON, checkpoints, and timing
+records are retained under
+`../benchmark-forward-tangent-corrected-20260903/{qa-analytic,qh-analytic}`
+relative to the cuMES checkout. The focused diagnostics are under
+`../tmp/lambda-isolation` and the corrected smoke logs under
+`../tmp/tangent-fix-smoke`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
