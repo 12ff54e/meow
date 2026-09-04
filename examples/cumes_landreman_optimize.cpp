@@ -691,8 +691,16 @@ class LandremanResidual {
                 total_nonlinear_iterations_ += solved.total_iterations;
                 jacobian_nonlinear_iterations += solved.total_iterations;
                 if (!solved.converged || !solved.has_complete_equilibrium()) {
-                    throw std::runtime_error(
-                        "parallel finite-difference equilibrium failed");
+                    std::ostringstream message;
+                    message << "parallel finite-difference equilibrium failed"
+                            << " column=" << (first + offset)
+                            << " workers=" << worker_count
+                            << " failed_stage=" << solved.failed_stage
+                            << " iterations=" << solved.total_iterations
+                            << " fsqr=" << solved.fsqr
+                            << " fsqz=" << solved.fsqz
+                            << " fsql=" << solved.fsql;
+                    throw std::runtime_error(message.str());
                 }
                 const auto spec = target_spec(solved.report.input_params.nfp);
                 const double target_aspect =
@@ -747,6 +755,11 @@ class LandremanResidual {
 
     meow::Matrix four_worker_finite_difference_jacobian(const meow::Vector& x) {
         return parallel_finite_difference_jacobian(x, std::nullopt, 4);
+    }
+
+    meow::Matrix eight_worker_finite_difference_jacobian(
+        const meow::Vector& x) {
+        return parallel_finite_difference_jacobian(x, std::nullopt, 8);
     }
 
     std::size_t equilibrium_evaluations() const { return evaluation_count_; }
@@ -1345,8 +1358,11 @@ int main(int argc, char** argv) {
                         residual.cold_finite_difference_jacobian(initial);
                     const meow::Matrix two_workers =
                         residual.parallel_finite_difference_jacobian(initial);
-                    meow::Matrix four_workers =
+                    const meow::Matrix four_workers =
                         residual.four_worker_finite_difference_jacobian(
+                            initial);
+                    meow::Matrix eight_workers =
+                        residual.eight_worker_finite_difference_jacobian(
                             initial);
                     std::cout
                         << "parallel_worker_comparison "
@@ -1356,10 +1372,14 @@ int main(int argc, char** argv) {
                         << (four_workers - cold).norm() / cold.norm()
                         << " two_four_relative_frobenius_difference="
                         << (four_workers - two_workers).norm() / cold.norm()
+                        << " eight_relative_frobenius_error="
+                        << (eight_workers - cold).norm() / cold.norm()
+                        << " four_eight_relative_frobenius_difference="
+                        << (eight_workers - four_workers).norm() / cold.norm()
                         << '\n';
                     result.x = initial;
                     result.residual = residual(initial);
-                    result.jacobian = std::move(four_workers);
+                    result.jacobian = std::move(eight_workers);
                     result.gradient =
                         result.jacobian.transpose() * result.residual;
                     result.cost = 0.5 * result.residual.squaredNorm();

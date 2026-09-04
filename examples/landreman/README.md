@@ -134,8 +134,8 @@ the concurrent and serial matrices directly before timing an optimization.
 `relaxed-parallel-finite-difference-check` instead solves only the perturbed
 columns at tolerance `2e-12` and compares them with the qualified cold matrix;
 it is diagnostic-only until that derivative-accuracy gate passes.
-`parallel-worker-count-check` times qualified serial, two-worker, and
-four-worker Jacobians at the selected stage and checks both concurrent matrices
+`parallel-worker-count-check` times qualified serial, two-, four-, and
+eight-worker Jacobians at the selected stage and checks every concurrent matrix
 against the serial result.
 `hot-finite-difference` retains its historical `1e-4` step floor, while
 `warm-finite-difference` uses the qualified case-specific step exactly and

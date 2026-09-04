@@ -1183,6 +1183,16 @@ stay within the device/host memory envelope, and materially beat four-worker
 Jacobian time in both cases to justify another full benchmark. This locates
 the concurrency saturation point without committing to another long run.
 
+Eight workers are not qualified. The QA diagnostic lost convergence for at
+least one perturbation in the eight-way batch after its serial, two-worker,
+and four-worker matrices completed normally. QH remained bit-exact but took
+0.789 s with eight workers versus 0.718 s with four, a 9.9% regression; peak
+RSS also rose to 215,628 KiB. Four workers are therefore the measured
+concurrency optimum on this TITAN Xp. The eight-worker diagnostic remains
+available to characterize other devices, but the qualified fast selector is
+`four-worker-aggressive-broyden`. Artifacts are under
+`../tmp/parallel-worker-count-check-8`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
