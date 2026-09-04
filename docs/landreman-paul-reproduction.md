@@ -1244,6 +1244,32 @@ time from 3.143 s serial to 1.320 s. Zero workers were rejected before solving,
 and all ten meow tests passed. The three-worker output is
 `../tmp/configurable-workers-three.json`.
 
+### Jacobian pipeline profiling plan
+
+The next performance pass will first measure the complete parallel finite-
+difference pipeline rather than assume that another CUDA port is beneficial.
+For every exact Jacobian refresh, record aggregate wall time in problem
+construction and validation, `EquilibriumSolver` construction, equilibrium
+solution, target evaluation, and Jacobian assembly. Also report cuMES's summed
+device time and the critical-path worker wall time so GPU work can be separated
+from host setup and batch-tail imbalance.
+
+The initial code inspection shows that `EquilibriumSolver` construction itself
+only allocates its empty implementation object; streams, multigrid operators,
+cuFFT plans, and device storage are currently created within `solve()`. A
+meow-only pool of solver facade objects therefore cannot retain those resources.
+Profiling must confirm the size of this setup cost before requesting a
+persistent cuMES execution context. Target evaluation currently runs on the
+calling thread after each batch joins. If it is material, evaluate completed
+targets concurrently without changing column order or numerical results.
+
+The acceptance gates are: identical finite-difference columns and nonlinear
+iteration counts, all meow tests passing, and a positive mode-1 QA timing result
+on the same worker count. Keep profiling opt-in or compact enough that ordinary
+optimization output remains useful. Store experiment artifacts under sibling
+`../tmp`, never `/tmp`. Reject any implementation whose added scheduling cost
+outweighs the measured host-side work.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
