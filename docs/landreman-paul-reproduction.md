@@ -1204,6 +1204,15 @@ the objective within 0.1%; otherwise it is rejected. Complete constructions
 will run only if both gates pass, and the already qualified four-worker policy
 will remain unchanged.
 
+The extended policy failed the first QA gate and is rejected without QH or
+complete constructions. It reduced exact refreshes from six to four, but the
+staler model needed 45 accepted steps rather than 19 and 116 equilibrium
+evaluations rather than 83. Wall time rose from 12.86 s to 21.95 s (1.71x
+slower). The objective `9.62743425058e-3` was only 0.0135% higher, so quality
+was not the failure; extra trial/center solves overwhelmed the saved
+Jacobians. The eight-step/0.5-defect four-worker policy remains qualified.
+Artifacts are under `../tmp/extended-four-worker-broyden-mode1/qa`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
