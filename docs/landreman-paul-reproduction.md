@@ -1169,6 +1169,20 @@ two-worker combined run; only exact-refresh scheduling changed. Peak RSS was
 325,656 KiB. Full QA artifacts are under
 `../benchmark-four-worker-aggressive-broyden-20260904/qa`.
 
+The complete four-worker QH construction took 1,232.17 s and also reproduced
+every stage endpoint and the final `3.99555777572e-5` objective. It is 1.414x
+faster than the two-worker combined run (1,741.81 s), 2.176x faster than
+serial aggressive Broyden (2,681.44 s), and 2.648x faster than the historical
+cold run (3,262.78 s). Its equilibrium/nonlinear work counts are identical to
+the two-worker combined run, and peak RSS was 356,088 KiB. Complete artifacts
+are under `../benchmark-four-worker-aggressive-broyden-20260904/{qa,qh}`.
+
+Since four workers still improved both complete constructions, one final
+diagnostic will test eight workers on mode-1 QA/QH. It must remain bit-exact,
+stay within the device/host memory envelope, and materially beat four-worker
+Jacobian time in both cases to justify another full benchmark. This locates
+the concurrency saturation point without committing to another long run.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
