@@ -15,8 +15,19 @@ add_library(meow_json src/third_party/json_parser.cpp)
 target_compile_features(meow_json PUBLIC cxx_std_20)
 target_include_directories(
     meow_json
-    PUBLIC
+    PRIVATE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/cumes>)
+
+add_library(meow_rundown src/config/relaxation_rundown.cpp)
+add_library(meow::rundown ALIAS meow_rundown)
+target_compile_features(meow_rundown PUBLIC cxx_std_20)
+target_link_libraries(meow_rundown PRIVATE meow_json)
+target_include_directories(
+    meow_rundown
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cumes)
 
 add_library(meow_trf src/trf.cpp)
 add_library(meow::trf ALIAS meow_trf)
@@ -45,6 +56,7 @@ endfunction()
 
 meow_enable_warnings(meow_trf)
 meow_enable_warnings(meow_json)
+meow_enable_warnings(meow_rundown)
 
 if(MEOW_BUILD_CUMES_INTEGRATION)
     if(NOT TARGET cumes::solver)
@@ -89,6 +101,14 @@ if(MEOW_BUILD_TESTS)
     target_link_libraries(test_trf PRIVATE meow::trf)
     meow_enable_warnings(test_trf)
     add_test(NAME trf_unit COMMAND test_trf)
+
+    add_executable(test_relaxation_rundown
+                   tests/test_relaxation_rundown.cpp)
+    target_include_directories(test_relaxation_rundown PRIVATE
+                               ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    target_link_libraries(test_relaxation_rundown PRIVATE meow::rundown)
+    meow_enable_warnings(test_relaxation_rundown)
+    add_test(NAME relaxation_rundown_unit COMMAND test_relaxation_rundown)
 
     if(MEOW_BUILD_CUMES_INTEGRATION)
         add_executable(test_boundary_parameterization
@@ -173,7 +193,7 @@ if(MEOW_BUILD_TESTS)
 endif()
 
 include(GNUInstallDirs)
-install(TARGETS meow_trf EXPORT meowTargets)
+install(TARGETS meow_json meow_rundown meow_trf EXPORT meowTargets)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(
     EXPORT meowTargets
