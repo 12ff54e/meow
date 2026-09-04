@@ -620,6 +620,14 @@ class LandremanResidual {
         const meow::Vector& x,
         std::optional<double> relaxed_tolerance = std::nullopt,
         std::size_t worker_count = 2) {
+        struct WorkerResult {
+            cumes::SolveOutcome solved;
+            double validation_seconds = 0.0;
+            double solver_construction_seconds = 0.0;
+            double solve_seconds = 0.0;
+            double worker_seconds = 0.0;
+        };
+
         if (worker_count == 0) {
             throw std::invalid_argument(
                 "parallel Jacobian worker count must be positive");
@@ -634,15 +642,27 @@ class LandremanResidual {
         meow::Matrix result(primal_residual.size(), x.size());
         const auto& finite_difference = rundown_.optimizer.jacobian;
         std::size_t jacobian_nonlinear_iterations = 0;
+        double problem_construction_seconds = 0.0;
+        double validation_seconds = 0.0;
+        double solver_construction_seconds = 0.0;
+        double solve_seconds = 0.0;
+        double device_seconds = 0.0;
+        double target_seconds = 0.0;
+        double assembly_seconds = 0.0;
+        double critical_worker_seconds = 0.0;
+        double batch_tail_idle_seconds = 0.0;
 
         const Eigen::Index workers = static_cast<Eigen::Index>(worker_count);
         for (Eigen::Index first = 0; first < x.size(); first += workers) {
             const Eigen::Index batch_size = std::min(workers, x.size() - first);
-            std::vector<std::future<cumes::SolveOutcome>> futures;
+            std::vector<std::future<WorkerResult>> futures;
             std::vector<double> steps;
+            std::vector<double> batch_worker_seconds;
             futures.reserve(static_cast<std::size_t>(batch_size));
             steps.reserve(static_cast<std::size_t>(batch_size));
+            batch_worker_seconds.reserve(static_cast<std::size_t>(batch_size));
             for (Eigen::Index offset = 0; offset < batch_size; ++offset) {
+                const auto problem_start = std::chrono::steady_clock::now();
                 const Eigen::Index column = first + offset;
                 const double step = std::max(
                     finite_difference.relative_step * std::abs(x[column]),
@@ -656,6 +676,10 @@ class LandremanResidual {
                             std::max(request.tolerance, *relaxed_tolerance);
                     }
                 }
+                problem_construction_seconds +=
+                    std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - problem_start)
+                        .count();
                 steps.push_back(step);
                 futures.emplace_back(std::async(
                     std::launch::async,
@@ -664,6 +688,9 @@ class LandremanResidual {
                      use_catmull =
                          rundown_.initialization.radial_transfer ==
                          meow::config::RadialTransfer::CATMULL_ROM]() mutable {
+                        const auto worker_start =
+                            std::chrono::steady_clock::now();
+                        const auto validation_start = worker_start;
                         cumes::ValidationResult validated = cumes::validate(
                             std::move(problem), validation_options);
                         if (!validated.has_value()) {
@@ -672,18 +699,49 @@ class LandremanResidual {
                                 "parallel Jacobian boundary validation "
                                 "failed"));
                         }
+                        const auto construction_start =
+                            std::chrono::steady_clock::now();
                         cumes::EquilibriumSolver solver;
+                        const auto solve_start =
+                            std::chrono::steady_clock::now();
                         cumes::SolveRequest request;
                         if (use_catmull) {
                             request.radial_transfer =
                                 cumes::RadialTransferPolicy::CATMULL_ROM;
                         }
-                        return solver.solve(validated.value(), request);
+                        cumes::SolveOutcome solved =
+                            solver.solve(validated.value(), request);
+                        const auto worker_end =
+                            std::chrono::steady_clock::now();
+                        WorkerResult result;
+                        result.solved = std::move(solved);
+                        result.validation_seconds =
+                            std::chrono::duration<double>(construction_start -
+                                                          validation_start)
+                                .count();
+                        result.solver_construction_seconds =
+                            std::chrono::duration<double>(solve_start -
+                                                          construction_start)
+                                .count();
+                        result.solve_seconds = std::chrono::duration<double>(
+                                                   worker_end - solve_start)
+                                                   .count();
+                        result.worker_seconds = std::chrono::duration<double>(
+                                                    worker_end - worker_start)
+                                                    .count();
+                        return result;
                     }));
             }
             for (Eigen::Index offset = 0; offset < batch_size; ++offset) {
-                cumes::SolveOutcome solved =
+                WorkerResult worker_result =
                     futures[static_cast<std::size_t>(offset)].get();
+                validation_seconds += worker_result.validation_seconds;
+                solver_construction_seconds +=
+                    worker_result.solver_construction_seconds;
+                solve_seconds += worker_result.solve_seconds;
+                batch_worker_seconds.push_back(worker_result.worker_seconds);
+                cumes::SolveOutcome solved = std::move(worker_result.solved);
+                device_seconds += solved.total_device_time_ms * 1.0e-3;
                 ++evaluation_count_;
                 total_nonlinear_iterations_ += solved.total_iterations;
                 jacobian_nonlinear_iterations += solved.total_iterations;
@@ -699,7 +757,12 @@ class LandremanResidual {
                             << " fsql=" << solved.fsql;
                     throw std::runtime_error(message.str());
                 }
+                const auto target_start = std::chrono::steady_clock::now();
                 const auto target = calculate_target(solved);
+                target_seconds +=
+                    std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - target_start)
+                        .count();
                 if (target.residuals.size() !=
                     static_cast<std::size_t>(result.rows())) {
                     throw std::runtime_error(
@@ -707,6 +770,7 @@ class LandremanResidual {
                 }
                 const Eigen::Index column = first + offset;
                 const double step = steps[static_cast<std::size_t>(offset)];
+                const auto assembly_start = std::chrono::steady_clock::now();
                 for (std::size_t row = 0; row < target.residuals.size();
                      ++row) {
                     result(static_cast<Eigen::Index>(row), column) =
@@ -714,6 +778,16 @@ class LandremanResidual {
                          primal_residual[static_cast<Eigen::Index>(row)]) /
                         step;
                 }
+                assembly_seconds +=
+                    std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - assembly_start)
+                        .count();
+            }
+            const double critical_worker = *std::max_element(
+                batch_worker_seconds.begin(), batch_worker_seconds.end());
+            critical_worker_seconds += critical_worker;
+            for (const double worker_seconds : batch_worker_seconds) {
+                batch_tail_idle_seconds += critical_worker - worker_seconds;
             }
         }
         const double wall_seconds =
@@ -726,7 +800,17 @@ class LandremanResidual {
                   << " workers=" << worker_count
                   << " nonlinear_iterations=" << jacobian_nonlinear_iterations
                   << " relaxed_tolerance=" << relaxed_tolerance.value_or(0.0)
-                  << " wall_seconds=" << wall_seconds << '\n';
+                  << " wall_seconds=" << wall_seconds
+                  << " problem_seconds=" << problem_construction_seconds
+                  << " validation_seconds=" << validation_seconds
+                  << " solver_construction_seconds="
+                  << solver_construction_seconds
+                  << " solve_seconds=" << solve_seconds
+                  << " device_seconds=" << device_seconds
+                  << " critical_worker_seconds=" << critical_worker_seconds
+                  << " batch_tail_idle_seconds=" << batch_tail_idle_seconds
+                  << " target_seconds=" << target_seconds
+                  << " assembly_seconds=" << assembly_seconds << '\n';
         return result;
     }
 
