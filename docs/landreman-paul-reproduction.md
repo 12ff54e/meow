@@ -1271,20 +1271,24 @@ optimization output remains useful. Store experiment artifacts under sibling
 outweighs the measured host-side work.
 
 The four-worker Release profiles showed that facade construction and cuMES
-setup are not useful optimization targets. Across the eight mode-1 columns,
-QA spent 3.245 s inside cuMES: 3.240 s in multigrid, 0.00381 s in setup, and
-0.000512 s transferring the final state. QH spent 2.580 s inside cuMES:
-2.575 s in multigrid, 0.00492 s in setup, and 0.000502 s in final transfer.
-Thus setup was only 0.12% of QA and 0.19% of QH summed solve time.
+outer setup are not useful optimization targets. A final controlled pass used
+the complete cuMES package, including B-spline radial transfer, and three runs
+of each mode-1 case. Across the eight columns, mean QA multigrid time was
+3.152 s: 2.898 s (91.9%) in stage iteration, 0.137 s (4.3%) in stage setup,
+0.0603 s (1.9%) in output capture, 0.0417 s (1.3%) in teardown, and 0.0151 s
+(0.5%) in the remaining multigrid work. QH averaged 2.663 s: 2.410 s (90.5%)
+in iteration, 0.141 s (5.3%) in setup, 0.0619 s (2.3%) in output, 0.0380 s
+(1.4%) in teardown, and 0.0125 s (0.5%) elsewhere. Outer setup and final
+transfer remained below 0.2% each.
 
 Target calculation was independent for each perturbation, so it was moved into
 the same worker immediately after that worker's equilibrium converged. In a
-controlled Release comparison against the pre-overlap commit, QA Jacobian wall
-time fell from 0.882 s to 0.852 s (1.035x), and QH fell from 0.733 s to 0.684 s
-(1.072x). Both concurrent Jacobians remained bit-identical to their serial
-controls and retained exactly 12,817 QA and 8,347 QH nonlinear iterations. All
-12 meow tests passed against the instrumented cuMES interface. The profiles and
-equilibrium artifacts are under `../tmp/meow-jacobian-pipeline-profile`.
+controlled three-run Release comparison against the pre-overlap commit, median
+QA Jacobian wall time fell from 0.842 s to 0.827 s (1.019x), and QH fell from
+0.732 s to 0.693 s (1.057x). Both concurrent Jacobians remained bit-identical
+to their serial controls and retained exactly 12,171 QA and 8,347 QH nonlinear
+iterations. The profiles and equilibrium artifacts are under
+`../tmp/meow-jacobian-pipeline-profile/detailed`.
 
 ### Dynamic Jacobian scheduling plan
 
@@ -1303,6 +1307,12 @@ change tolerances, finite-difference steps, solver requests, or failure gates.
 Compare QA and QH mode-1 Jacobians bit-for-bit with the serial controls and with
 the fixed-batch timing above. Retain the scheduler only if it reduces Release
 wall time without changing nonlinear iteration counts or increasing failures.
+
+The dynamic scheduler passed the numerical gates but not the timing gate. Its
+three-run median QA time was 0.811 s, 1.020x faster than fixed batching, while
+QH was 0.707 s, 2.0% slower than fixed batching. The optimization was therefore
+rejected and reverted. The worker-local target calculation remains accepted;
+the fixed-batch implementation has lower complexity and improves both cases.
 
 ## cuMES final-boundary cross-check
 
