@@ -1193,6 +1193,17 @@ available to characterize other devices, but the qualified fast selector is
 `four-worker-aggressive-broyden`. Artifacts are under
 `../tmp/parallel-worker-count-check-8`.
 
+### Extended secant-reuse experiment plan
+
+The next experiment keeps four-worker exact refreshes but tests whether the
+eight-step/0.5-defect aggressive safeguards are now unnecessarily
+conservative. An opt-in extended policy will allow a Jacobian age of 16,
+accept every positive-reduction trust ratio, and refresh at relative secant
+defect 1.0. Mode-1 QA/QH must improve the four-worker wall time while keeping
+the objective within 0.1%; otherwise it is rejected. Complete constructions
+will run only if both gates pass, and the already qualified four-worker policy
+will remain unchanged.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
