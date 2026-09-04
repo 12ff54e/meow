@@ -8,6 +8,12 @@ option(MEOW_BUILD_TESTS "Build the meow test suite" ON)
 option(MEOW_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(MEOW_BUILD_CUMES_INTEGRATION
        "Build optimizer targets and examples backed by cuMES" OFF)
+option(MEOW_FETCH_CUMES
+       "Fetch cuMES when building the optional equilibrium integration" OFF)
+set(MEOW_CUMES_GIT_REPOSITORY "https://github.com/12ff54e/cuMES.git"
+    CACHE STRING "Git repository used when MEOW_FETCH_CUMES is enabled")
+set(MEOW_CUMES_GIT_TAG "f61c959334bb62e14c049c66335580b45f63610d"
+    CACHE STRING "Pinned cuMES revision used when MEOW_FETCH_CUMES is enabled")
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
@@ -60,6 +66,39 @@ meow_enable_warnings(meow_rundown)
 
 if(MEOW_BUILD_CUMES_INTEGRATION)
     if(NOT TARGET cumes::solver)
+        if(MEOW_FETCH_CUMES)
+            if(CMAKE_VERSION VERSION_LESS 3.24)
+                message(FATAL_ERROR
+                    "MEOW_FETCH_CUMES requires CMake 3.24 or newer")
+            endif()
+            include(FetchContent)
+
+            # Keep the fetched project focused on the fixed-boundary solver
+            # library needed by meow. Do not overwrite choices already made by
+            # a parent project or explicitly supplied on the command line.
+            foreach(cumes_option IN ITEMS
+                    CUMES_BUILD_CLI
+                    CUMES_BUILD_TESTS
+                    CUMES_BUILD_BENCHMARKS
+                    CUMES_USE_NETCDF
+                    CUMES_USE_HDF5
+                    CUMES_USE_VACUUM_FIELD
+                    CUMES_BUILD_MAGNETIC_COORDINATE
+                    CUMES_ENABLE_VERIFY_DUMP)
+                if(NOT DEFINED ${cumes_option})
+                    set(${cumes_option} OFF CACHE BOOL
+                        "Disabled for meow's embedded cuMES build")
+                endif()
+            endforeach()
+
+            FetchContent_Declare(
+                cuMES
+                GIT_REPOSITORY ${MEOW_CUMES_GIT_REPOSITORY}
+                GIT_TAG ${MEOW_CUMES_GIT_TAG}
+                GIT_SHALLOW FALSE
+                GIT_SUBMODULES deps/BSplineInterpolation
+                OVERRIDE_FIND_PACKAGE)
+        endif()
         find_package(cuMES CONFIG REQUIRED)
     endif()
 
