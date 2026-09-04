@@ -2,7 +2,6 @@
 #include "clap.h"
 
 #include <algorithm>
-#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <filesystem>
@@ -631,14 +630,6 @@ class LandremanResidual {
             double target_seconds = 0.0;
             double worker_seconds = 0.0;
         };
-        struct ColumnInput {
-            cumes::ProblemSpec problem;
-            double step = 0.0;
-        };
-        struct WorkerBatchResult {
-            std::vector<std::pair<Eigen::Index, WorkerResult>> columns;
-            double worker_seconds = 0.0;
-        };
 
         if (worker_count == 0) {
             throw std::invalid_argument(
@@ -663,203 +654,166 @@ class LandremanResidual {
         double cumes_multigrid_seconds = 0.0;
         double cumes_transfer_seconds = 0.0;
         double cumes_total_seconds = 0.0;
-        double stage_setup_seconds = 0.0;
-        double stage_iteration_seconds = 0.0;
-        double stage_output_seconds = 0.0;
-        double stage_teardown_seconds = 0.0;
-        double multigrid_other_seconds = 0.0;
         double target_seconds = 0.0;
         double assembly_seconds = 0.0;
         double critical_worker_seconds = 0.0;
         double batch_tail_idle_seconds = 0.0;
 
-        const auto solve_problem =
-            [this, validation_options = validation_options_,
-             use_catmull = rundown_.initialization.radial_transfer ==
-                           meow::config::RadialTransfer::CATMULL_ROM](
-                cumes::ProblemSpec problem) {
-                const auto worker_start = std::chrono::steady_clock::now();
-                const auto validation_start = worker_start;
-                cumes::ValidationResult validated =
-                    cumes::validate(std::move(problem), validation_options);
-                if (!validated.has_value()) {
-                    throw std::runtime_error(first_error(
-                        validated.error(),
-                        "parallel Jacobian boundary validation failed"));
+        const Eigen::Index workers = static_cast<Eigen::Index>(worker_count);
+        for (Eigen::Index first = 0; first < x.size(); first += workers) {
+            const Eigen::Index batch_size = std::min(workers, x.size() - first);
+            std::vector<std::future<WorkerResult>> futures;
+            std::vector<double> steps;
+            std::vector<double> batch_worker_seconds;
+            futures.reserve(static_cast<std::size_t>(batch_size));
+            steps.reserve(static_cast<std::size_t>(batch_size));
+            batch_worker_seconds.reserve(static_cast<std::size_t>(batch_size));
+            for (Eigen::Index offset = 0; offset < batch_size; ++offset) {
+                const auto problem_start = std::chrono::steady_clock::now();
+                const Eigen::Index column = first + offset;
+                const double step = std::max(
+                    finite_difference.relative_step * std::abs(x[column]),
+                    finite_difference.absolute_step);
+                meow::Vector perturbed = x;
+                perturbed[column] += step;
+                cumes::ProblemSpec problem = trial_problem(perturbed);
+                if (relaxed_tolerance.has_value()) {
+                    for (cumes::StageRequest& request : problem.stages) {
+                        request.tolerance =
+                            std::max(request.tolerance, *relaxed_tolerance);
+                    }
                 }
-                const auto construction_start =
-                    std::chrono::steady_clock::now();
-                cumes::EquilibriumSolver solver;
-                const auto solve_start = std::chrono::steady_clock::now();
-                cumes::SolveRequest request;
-                if (use_catmull) {
-                    request.radial_transfer =
-                        cumes::RadialTransferPolicy::CATMULL_ROM;
+                problem_construction_seconds +=
+                    std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - problem_start)
+                        .count();
+                steps.push_back(step);
+                futures.emplace_back(std::async(
+                    std::launch::async,
+                    [this, problem = std::move(problem),
+                     validation_options = validation_options_,
+                     use_catmull =
+                         rundown_.initialization.radial_transfer ==
+                         meow::config::RadialTransfer::CATMULL_ROM]() mutable {
+                        const auto worker_start =
+                            std::chrono::steady_clock::now();
+                        const auto validation_start = worker_start;
+                        cumes::ValidationResult validated = cumes::validate(
+                            std::move(problem), validation_options);
+                        if (!validated.has_value()) {
+                            throw std::runtime_error(first_error(
+                                validated.error(),
+                                "parallel Jacobian boundary validation "
+                                "failed"));
+                        }
+                        const auto construction_start =
+                            std::chrono::steady_clock::now();
+                        cumes::EquilibriumSolver solver;
+                        const auto solve_start =
+                            std::chrono::steady_clock::now();
+                        cumes::SolveRequest request;
+                        if (use_catmull) {
+                            request.radial_transfer =
+                                cumes::RadialTransferPolicy::CATMULL_ROM;
+                        }
+                        cumes::SolveOutcome solved =
+                            solver.solve(validated.value(), request);
+                        const auto solve_end = std::chrono::steady_clock::now();
+                        std::optional<
+                            cumes_meow_example::CompositeQuasisymmetryTarget>
+                            target;
+                        if (solved.converged &&
+                            solved.has_complete_equilibrium()) {
+                            target.emplace(calculate_target(solved));
+                        }
+                        const auto worker_end =
+                            std::chrono::steady_clock::now();
+                        WorkerResult result;
+                        result.solved = std::move(solved);
+                        result.target = std::move(target);
+                        result.validation_seconds =
+                            std::chrono::duration<double>(construction_start -
+                                                          validation_start)
+                                .count();
+                        result.solver_construction_seconds =
+                            std::chrono::duration<double>(solve_start -
+                                                          construction_start)
+                                .count();
+                        result.solve_seconds = std::chrono::duration<double>(
+                                                   solve_end - solve_start)
+                                                   .count();
+                        result.target_seconds = std::chrono::duration<double>(
+                                                    worker_end - solve_end)
+                                                    .count();
+                        result.worker_seconds = std::chrono::duration<double>(
+                                                    worker_end - worker_start)
+                                                    .count();
+                        return result;
+                    }));
+            }
+            for (Eigen::Index offset = 0; offset < batch_size; ++offset) {
+                WorkerResult worker_result =
+                    futures[static_cast<std::size_t>(offset)].get();
+                validation_seconds += worker_result.validation_seconds;
+                solver_construction_seconds +=
+                    worker_result.solver_construction_seconds;
+                solve_seconds += worker_result.solve_seconds;
+                target_seconds += worker_result.target_seconds;
+                batch_worker_seconds.push_back(worker_result.worker_seconds);
+                cumes::SolveOutcome solved = std::move(worker_result.solved);
+                device_seconds += solved.total_device_time_ms * 1.0e-3;
+                cumes_setup_seconds += solved.timings.setup_wall_ms * 1.0e-3;
+                cumes_multigrid_seconds +=
+                    solved.timings.multigrid_wall_ms * 1.0e-3;
+                cumes_transfer_seconds +=
+                    solved.timings.final_state_transfer_wall_ms * 1.0e-3;
+                cumes_total_seconds += solved.timings.total_wall_ms * 1.0e-3;
+                ++evaluation_count_;
+                total_nonlinear_iterations_ += solved.total_iterations;
+                jacobian_nonlinear_iterations += solved.total_iterations;
+                if (!solved.converged || !solved.has_complete_equilibrium()) {
+                    std::ostringstream message;
+                    message << "parallel finite-difference equilibrium failed"
+                            << " column=" << (first + offset)
+                            << " workers=" << worker_count
+                            << " failed_stage=" << solved.failed_stage
+                            << " iterations=" << solved.total_iterations
+                            << " fsqr=" << solved.fsqr
+                            << " fsqz=" << solved.fsqz
+                            << " fsql=" << solved.fsql;
+                    throw std::runtime_error(message.str());
                 }
-                cumes::SolveOutcome solved =
-                    solver.solve(validated.value(), request);
-                const auto solve_end = std::chrono::steady_clock::now();
-                std::optional<cumes_meow_example::CompositeQuasisymmetryTarget>
-                    target;
-                if (solved.converged && solved.has_complete_equilibrium()) {
-                    target.emplace(calculate_target(solved));
+                if (!worker_result.target.has_value()) {
+                    throw std::runtime_error(
+                        "parallel worker did not produce target residuals");
                 }
-                const auto worker_end = std::chrono::steady_clock::now();
-                WorkerResult result;
-                result.solved = std::move(solved);
-                result.target = std::move(target);
-                result.validation_seconds =
-                    std::chrono::duration<double>(construction_start -
-                                                  validation_start)
-                        .count();
-                result.solver_construction_seconds =
-                    std::chrono::duration<double>(solve_start -
-                                                  construction_start)
-                        .count();
-                result.solve_seconds =
-                    std::chrono::duration<double>(solve_end - solve_start)
-                        .count();
-                result.target_seconds =
-                    std::chrono::duration<double>(worker_end - solve_end)
-                        .count();
-                result.worker_seconds =
-                    std::chrono::duration<double>(worker_end - worker_start)
-                        .count();
-                return result;
-            };
-
-        std::vector<ColumnInput> inputs;
-        inputs.reserve(static_cast<std::size_t>(x.size()));
-        for (Eigen::Index column = 0; column < x.size(); ++column) {
-            const auto problem_start = std::chrono::steady_clock::now();
-            const double step =
-                std::max(finite_difference.relative_step * std::abs(x[column]),
-                         finite_difference.absolute_step);
-            meow::Vector perturbed = x;
-            perturbed[column] += step;
-            cumes::ProblemSpec problem = trial_problem(perturbed);
-            if (relaxed_tolerance.has_value()) {
-                for (cumes::StageRequest& request : problem.stages) {
-                    request.tolerance =
-                        std::max(request.tolerance, *relaxed_tolerance);
+                const auto& target = *worker_result.target;
+                if (target.residuals.size() !=
+                    static_cast<std::size_t>(result.rows())) {
+                    throw std::runtime_error(
+                        "parallel target residual has the wrong length");
                 }
-            }
-            inputs.push_back({std::move(problem), step});
-            problem_construction_seconds +=
-                std::chrono::duration<double>(std::chrono::steady_clock::now() -
-                                              problem_start)
-                    .count();
-        }
-
-        const Eigen::Index workers =
-            std::min(static_cast<Eigen::Index>(worker_count), x.size());
-        std::atomic<Eigen::Index> next_column{0};
-        const auto run_worker = [&]() {
-            const auto worker_start = std::chrono::steady_clock::now();
-            WorkerBatchResult batch;
-            while (true) {
-                const Eigen::Index column =
-                    next_column.fetch_add(1, std::memory_order_relaxed);
-                if (column >= static_cast<Eigen::Index>(inputs.size())) {
-                    break;
+                const Eigen::Index column = first + offset;
+                const double step = steps[static_cast<std::size_t>(offset)];
+                const auto assembly_start = std::chrono::steady_clock::now();
+                for (std::size_t row = 0; row < target.residuals.size();
+                     ++row) {
+                    result(static_cast<Eigen::Index>(row), column) =
+                        (target.residuals[row] -
+                         primal_residual[static_cast<Eigen::Index>(row)]) /
+                        step;
                 }
-                WorkerResult worker_result = solve_problem(std::move(
-                    inputs[static_cast<std::size_t>(column)].problem));
-                batch.columns.emplace_back(column, std::move(worker_result));
+                assembly_seconds +=
+                    std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - assembly_start)
+                        .count();
             }
-            batch.worker_seconds =
-                std::chrono::duration<double>(std::chrono::steady_clock::now() -
-                                              worker_start)
-                    .count();
-            return batch;
-        };
-        std::vector<std::future<WorkerBatchResult>> futures;
-        futures.reserve(static_cast<std::size_t>(workers));
-        for (Eigen::Index worker = 0; worker < workers; ++worker) {
-            futures.emplace_back(std::async(std::launch::async, run_worker));
-        }
-
-        std::vector<std::optional<WorkerResult>> column_results(
-            static_cast<std::size_t>(x.size()));
-        std::vector<double> worker_group_seconds;
-        worker_group_seconds.reserve(static_cast<std::size_t>(workers));
-        for (std::future<WorkerBatchResult>& future : futures) {
-            WorkerBatchResult batch = future.get();
-            worker_group_seconds.push_back(batch.worker_seconds);
-            for (auto& [column, worker_result] : batch.columns) {
-                column_results[static_cast<std::size_t>(column)] =
-                    std::move(worker_result);
+            const double critical_worker = *std::max_element(
+                batch_worker_seconds.begin(), batch_worker_seconds.end());
+            critical_worker_seconds += critical_worker;
+            for (const double worker_seconds : batch_worker_seconds) {
+                batch_tail_idle_seconds += critical_worker - worker_seconds;
             }
-        }
-        for (Eigen::Index column = 0; column < x.size(); ++column) {
-            auto& stored = column_results[static_cast<std::size_t>(column)];
-            if (!stored.has_value()) {
-                throw std::runtime_error(
-                    "parallel worker did not produce a column result");
-            }
-            WorkerResult worker_result = std::move(*stored);
-            validation_seconds += worker_result.validation_seconds;
-            solver_construction_seconds +=
-                worker_result.solver_construction_seconds;
-            solve_seconds += worker_result.solve_seconds;
-            target_seconds += worker_result.target_seconds;
-            cumes::SolveOutcome solved = std::move(worker_result.solved);
-            device_seconds += solved.total_device_time_ms * 1.0e-3;
-            cumes_setup_seconds += solved.timings.setup_wall_ms * 1.0e-3;
-            cumes_multigrid_seconds +=
-                solved.timings.multigrid_wall_ms * 1.0e-3;
-            cumes_transfer_seconds +=
-                solved.timings.final_state_transfer_wall_ms * 1.0e-3;
-            cumes_total_seconds += solved.timings.total_wall_ms * 1.0e-3;
-            stage_setup_seconds += solved.timings.stage_setup_wall_ms * 1.0e-3;
-            stage_iteration_seconds +=
-                solved.timings.stage_iteration_wall_ms * 1.0e-3;
-            stage_output_seconds +=
-                solved.timings.stage_output_wall_ms * 1.0e-3;
-            stage_teardown_seconds +=
-                solved.timings.stage_teardown_wall_ms * 1.0e-3;
-            multigrid_other_seconds +=
-                solved.timings.multigrid_other_wall_ms * 1.0e-3;
-            ++evaluation_count_;
-            total_nonlinear_iterations_ += solved.total_iterations;
-            jacobian_nonlinear_iterations += solved.total_iterations;
-            if (!solved.converged || !solved.has_complete_equilibrium()) {
-                std::ostringstream message;
-                message << "parallel finite-difference equilibrium failed"
-                        << " column=" << column << " workers=" << worker_count
-                        << " failed_stage=" << solved.failed_stage
-                        << " iterations=" << solved.total_iterations
-                        << " fsqr=" << solved.fsqr << " fsqz=" << solved.fsqz
-                        << " fsql=" << solved.fsql;
-                throw std::runtime_error(message.str());
-            }
-            if (!worker_result.target.has_value()) {
-                throw std::runtime_error(
-                    "parallel worker did not produce target residuals");
-            }
-            const auto& target = *worker_result.target;
-            if (target.residuals.size() !=
-                static_cast<std::size_t>(result.rows())) {
-                throw std::runtime_error(
-                    "parallel target residual has the wrong length");
-            }
-            const double step = inputs[static_cast<std::size_t>(column)].step;
-            const auto assembly_start = std::chrono::steady_clock::now();
-            for (std::size_t row = 0; row < target.residuals.size(); ++row) {
-                result(static_cast<Eigen::Index>(row), column) =
-                    (target.residuals[row] -
-                     primal_residual[static_cast<Eigen::Index>(row)]) /
-                    step;
-            }
-            assembly_seconds +=
-                std::chrono::duration<double>(std::chrono::steady_clock::now() -
-                                              assembly_start)
-                    .count();
-        }
-        critical_worker_seconds = *std::max_element(
-            worker_group_seconds.begin(), worker_group_seconds.end());
-        for (const double worker_seconds : worker_group_seconds) {
-            batch_tail_idle_seconds += critical_worker_seconds - worker_seconds;
         }
         const double wall_seconds =
             std::chrono::duration<double>(std::chrono::steady_clock::now() -
@@ -882,11 +836,6 @@ class LandremanResidual {
                   << " cumes_multigrid_seconds=" << cumes_multigrid_seconds
                   << " cumes_transfer_seconds=" << cumes_transfer_seconds
                   << " cumes_total_seconds=" << cumes_total_seconds
-                  << " stage_setup_seconds=" << stage_setup_seconds
-                  << " stage_iteration_seconds=" << stage_iteration_seconds
-                  << " stage_output_seconds=" << stage_output_seconds
-                  << " stage_teardown_seconds=" << stage_teardown_seconds
-                  << " multigrid_other_seconds=" << multigrid_other_seconds
                   << " critical_worker_seconds=" << critical_worker_seconds
                   << " batch_tail_idle_seconds=" << batch_tail_idle_seconds
                   << " target_seconds=" << target_seconds
