@@ -24,6 +24,56 @@ The build uses strict C++20 and treats warnings as errors by default. Set
 `MEOW_WARNINGS_AS_ERRORS=OFF` only when integrating with an unusually noisy
 toolchain.
 
+### Build with cuMES
+
+The equilibrium-backed applications can obtain cuMES directly from its public
+repository. This path is explicit so a normal meow build never downloads or
+configures CUDA code:
+
+```bash
+cmake -S . -B build-cumes -G Ninja \
+  -DMEOW_BUILD_CUMES_INTEGRATION=ON \
+  -DMEOW_FETCH_CUMES=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build-cumes
+ctest --test-dir build-cumes --output-on-failure
+```
+
+Fetch mode requires CMake 3.24+, Git, CUDA Toolkit 11.8+, a C++20 CUDA host
+compiler, Eigen 3.3+, and a GPU with compute capability 6.1 or newer. cuMES
+defaults its CUDA host compiler to `/usr/bin/g++-12`; pass
+`-DCMAKE_CUDA_HOST_COMPILER=/path/to/compiler` when that is not appropriate for
+the installed CUDA toolkit.
+
+The default is pinned to audited cuMES commit
+`f61c959334bb62e14c049c66335580b45f63610d`, rather than a moving branch. The
+embedded build retains cuMES's B-spline multigrid transfer and fetches only
+that HTTPS-compatible submodule. It disables the standalone cuMES CLI, tests,
+benchmarks, vacuum-field support, magnetic-coordinate post-processing,
+NetCDF/HDF5 output, and verification dumps. Those facilities are not required
+for meow's fixed-boundary solver API.
+
+To use an already installed cuMES package instead, leave fetch mode off and
+make its config package discoverable:
+
+```bash
+cmake -S . -B build-cumes -G Ninja \
+  -DMEOW_BUILD_CUMES_INTEGRATION=ON \
+  -DcuMES_DIR=/path/to/cuMES/lib/cmake/cuMES \
+  -DCMAKE_BUILD_TYPE=Release
+```
+
+Advanced users can deliberately override `MEOW_CUMES_GIT_REPOSITORY` and
+`MEOW_CUMES_GIT_TAG`. For an offline checkout or cuMES development build, use
+CMake's standard source override:
+
+```bash
+cmake -S . -B build-cumes -G Ninja \
+  -DMEOW_BUILD_CUMES_INTEGRATION=ON \
+  -DMEOW_FETCH_CUMES=ON \
+  -DFETCHCONTENT_SOURCE_DIR_CUMES=/path/to/cuMES
+```
+
 The repository carries the same `.clang-format` and staged-file pre-commit
 formatter as cuMES. Activate the versioned hook after cloning with:
 
@@ -44,8 +94,9 @@ docs/                 numerical contracts and reproduction records
 ```
 
 The base build contains TRF and the strict rundown parser and does not require
-CUDA. Configure with `MEOW_BUILD_CUMES_INTEGRATION=ON` and a discoverable
-cuMES package to build the equilibrium-backed applications.
+CUDA. Configure with `MEOW_BUILD_CUMES_INTEGRATION=ON` and either a discoverable
+cuMES package or the FetchContent option above to build the equilibrium-backed
+applications.
 
 ## JSON-driven relaxation
 

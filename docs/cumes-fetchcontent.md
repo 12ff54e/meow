@@ -19,9 +19,10 @@ normal meow-only build independent of CUDA.
    override.
 3. Configure the embedded dependency as a library: disable its CLI, tests,
    benchmarks, optional output backends, Boozer converter, vacuum-field
-   coupling, verification dumps, and B-spline submodule. This avoids fetching
-   cuMES's SSH-addressed optional submodules and leaves meow's fixed-boundary
-   optimization path self-contained apart from CUDA.
+   coupling, and verification dumps. Retain its qualified B-spline multigrid
+   transfer and fetch only that submodule, whose relative URL resolves over
+   HTTPS. Do not fetch the SSH-addressed vacuum-field and magnetic-coordinate
+   submodules.
 4. Keep `find_package(cuMES CONFIG REQUIRED)` unchanged when fetching is off,
    and accept a pre-existing `cumes::solver` target in either mode so parent
    projects can provide the dependency themselves.
@@ -43,3 +44,26 @@ normal meow-only build independent of CUDA.
   post-processing targets.
 - Reconfiguring as a subproject does not forcibly replace cache choices that a
   parent project supplied before adding meow.
+
+## Implementation and validation
+
+`MEOW_FETCH_CUMES=ON` declares the pinned source with
+`OVERRIDE_FIND_PACKAGE`; the integration continues to consume the dependency
+through its single `find_package(cuMES CONFIG REQUIRED)` path. The override is
+a CMake 3.24 feature, so only fetch mode raises the effective minimum from the
+project-wide CMake 3.20 baseline. A parent-provided `cumes::solver` target still
+takes precedence.
+
+The public-fetch configuration resolved the exact pinned revision and only
+initialized `deps/BSplineInterpolation`; the vacuum-field and
+magnetic-coordinate submodules remained uninitialized. Its complete default
+build succeeded and all 12 meow tests passed. The same 12 tests passed against
+the separately installed cuMES package. A local
+`FETCHCONTENT_SOURCE_DIR_CUMES` override and the CUDA-free base configuration
+also configured successfully.
+
+cuMES currently declares both its double and float CUDA implementation
+libraries as normal build targets. Consequently, a default all-target
+FetchContent build compiles both variants even though meow links only the
+selected double solver. Avoiding that extra compilation requires an upstream
+cuMES target/option change; meow does not patch dependency sources.
