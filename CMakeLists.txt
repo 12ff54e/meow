@@ -11,6 +11,13 @@ option(MEOW_BUILD_CUMES_INTEGRATION
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
+add_library(meow_json src/third_party/json_parser.cpp)
+target_compile_features(meow_json PUBLIC cxx_std_20)
+target_include_directories(
+    meow_json
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/cumes>)
+
 add_library(meow_trf src/trf.cpp)
 add_library(meow::trf ALIAS meow_trf)
 
@@ -37,6 +44,7 @@ function(meow_enable_warnings target)
 endfunction()
 
 meow_enable_warnings(meow_trf)
+meow_enable_warnings(meow_json)
 
 if(MEOW_BUILD_CUMES_INTEGRATION)
     if(NOT TARGET cumes::solver)
