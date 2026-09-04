@@ -39,6 +39,7 @@ enum class JacobianMethod {
     AGGRESSIVE_BROYDEN,
     PARALLEL_AGGRESSIVE_BROYDEN,
     FOUR_WORKER_AGGRESSIVE_BROYDEN,
+    EXTENDED_FOUR_WORKER_BROYDEN,
     JACOBIAN_SCALED,
     TWO_ACCURACY,
     TWO_ACCURACY_BROYDEN,
@@ -64,6 +65,9 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
     }
     if (name == "four-worker-aggressive-broyden") {
         return JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN;
+    }
+    if (name == "extended-four-worker-broyden") {
+        return JacobianMethod::EXTENDED_FOUR_WORKER_BROYDEN;
     }
     if (name == "jacobian-scaled") { return JacobianMethod::JACOBIAN_SCALED; }
     if (name == "two-accuracy") { return JacobianMethod::TWO_ACCURACY; }
@@ -101,6 +105,7 @@ JacobianMethod parse_jacobian_method(const std::string& name) {
         "JACOBIAN_METHOD must be analytic, broyden, aggressive-broyden, "
         "parallel-aggressive-broyden, "
         "four-worker-aggressive-broyden, "
+        "extended-four-worker-broyden, "
         "jacobian-scaled, "
         "two-accuracy, two-accuracy-broyden, geometry-restart-check, "
         "geometry-restart-finite-difference, "
@@ -124,6 +129,8 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "parallel-aggressive-broyden";
         case JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN:
             return "four-worker-aggressive-broyden";
+        case JacobianMethod::EXTENDED_FOUR_WORKER_BROYDEN:
+            return "extended-four-worker-broyden";
         case JacobianMethod::JACOBIAN_SCALED:
             return "jacobian-scaled";
         case JacobianMethod::TWO_ACCURACY:
@@ -1003,6 +1010,7 @@ void print_usage() {
            "iteration. JACOBIAN_METHOD is finite-difference (default), "
            "broyden, aggressive-broyden, parallel-aggressive-broyden, "
            "four-worker-aggressive-broyden, "
+           "extended-four-worker-broyden, "
            "jacobian-scaled, two-accuracy, "
            "two-accuracy-broyden, geometry-restart-check, "
            "geometry-restart-finite-difference, hot-finite-difference, "
@@ -1147,6 +1155,12 @@ int main(int argc, char** argv) {
                     options.jacobian_refresh_interval = 8;
                     options.broyden_min_reduction_ratio = 0.05;
                     options.broyden_max_secant_error = 0.5;
+                }
+                if (jacobian_method ==
+                    JacobianMethod::EXTENDED_FOUR_WORKER_BROYDEN) {
+                    options.jacobian_refresh_interval = 16;
+                    options.broyden_min_reduction_ratio = 0.0;
+                    options.broyden_max_secant_error = 1.0;
                 }
                 if (jacobian_method == JacobianMethod::JACOBIAN_SCALED) {
                     options.scale_from_jacobian = true;
@@ -1424,7 +1438,9 @@ int main(int argc, char** argv) {
                                 x);
                         });
                 } else if (jacobian_method ==
-                           JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN) {
+                               JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN ||
+                           jacobian_method ==
+                               JacobianMethod::EXTENDED_FOUR_WORKER_BROYDEN) {
                     result = meow::trf_least_squares(
                         std::ref(residual), initial, options,
                         [&](const meow::Vector& x) {
