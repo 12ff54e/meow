@@ -1,5 +1,6 @@
 #include "test_support.hpp"
 
+#include <filesystem>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -147,6 +148,27 @@ int main() {
     check(meow::config::summarize_relaxation_rundown(rundown).find(
               "step=1 name=mode-2") != std::string::npos,
           "rundown summary lists steps");
+
+    const std::filesystem::path example_directory =
+        std::filesystem::path(MEOW_SOURCE_DIR) / "examples" / "landreman";
+    const auto qa_construction = meow::config::read_relaxation_rundown(
+        (example_directory / "qa-construction.rundown.json").string());
+    const auto qh_construction = meow::config::read_relaxation_rundown(
+        (example_directory / "qh-construction.rundown.json").string());
+    const auto qa_refinement = meow::config::read_relaxation_rundown(
+        (example_directory / "qa-refinement.rundown.json").string());
+    const auto qh_refinement = meow::config::read_relaxation_rundown(
+        (example_directory / "qh-refinement.rundown.json").string());
+    check(qa_construction.steps.size() == 4 &&
+              qa_construction.steps.back().equilibrium.minimum_iterations ==
+                  30000,
+          "canonical QA construction rundown is qualified");
+    check(qh_construction.steps.size() == 5 &&
+              qh_construction.target.helicity_n_per_field_period == -1,
+          "canonical QH construction rundown is qualified");
+    check(qa_refinement.target.surface_weights.back() == 30.0 &&
+              qh_refinement.target.surface_weights.back() == 2.0,
+          "canonical refinement edge weights are qualified");
 
     std::string unknown = VALID_RUNDOWN;
     unknown.replace(unknown.find("\"case\": \"qa\""), 12,

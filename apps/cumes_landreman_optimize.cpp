@@ -1,4 +1,6 @@
-// Reproduce the analytic construction or final refinement from Landreman-Paul.
+// Execute a JSON-described Landreman-Paul relaxation rundown.
+#include "clap.h"
+
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -22,6 +24,7 @@
 #include <cumes/io/writer.hpp>
 #include <cumes/solver/equilibrium_linearization.hpp>
 #include <cumes/solver/equilibrium_solver.hpp>
+#include <meow/config/relaxation_rundown.hpp>
 #include <meow/cumes/boundary_parameterization.hpp>
 #include <meow/cumes/landreman_workflow.hpp>
 #include <meow/cumes/quasisymmetry_target.hpp>
@@ -30,9 +33,7 @@
 
 namespace {
 
-using cumes_meow_example::LandremanCase;
-using cumes_meow_example::LandremanSelection;
-using cumes_meow_example::LandremanWorkflow;
+using meow::config::RelaxationRundown;
 
 enum class JacobianMethod {
     ANALYTIC,
@@ -160,26 +161,20 @@ const char* jacobian_method_name(JacobianMethod method) {
     return "unknown";
 }
 
-std::size_t default_parallel_worker_count(JacobianMethod method) {
-    if (method == JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN ||
-        method == JacobianMethod::EXTENDED_FOUR_WORKER_BROYDEN) {
-        return 4;
-    }
-    return 2;
-}
-
-std::size_t parse_parallel_worker_count(std::string_view text) {
+std::size_t parse_positive_size(std::string_view text,
+                                std::string_view option_name,
+                                bool eigen_index_bound = false) {
     std::size_t result = 0;
     const char* const begin = text.data();
     const char* const end = begin + text.size();
     const auto [parsed_end, error] = std::from_chars(begin, end, result);
     if (text.empty() || parsed_end != end || error != std::errc{} ||
         result == 0 ||
-        result > static_cast<std::size_t>(
-                     std::numeric_limits<Eigen::Index>::max())) {
-        throw std::invalid_argument(
-            "PARALLEL_WORKERS must be a positive integer representable by "
-            "Eigen::Index");
+        (eigen_index_bound &&
+         result > static_cast<std::size_t>(
+                      std::numeric_limits<Eigen::Index>::max()))) {
+        throw std::invalid_argument(std::string(option_name) +
+                                    " must be a positive integer");
     }
     return result;
 }
@@ -208,13 +203,13 @@ class LandremanResidual {
         cumes::ProblemSpec baseline,
         cumes_meow_example::StellaratorSymmetricBoundaryParameterization
             boundary,
-        LandremanSelection selection,
+        RelaxationRundown rundown,
         cumes::SolverOptions validation_options,
         const cumes::EquilibriumSnapshot* initial_restart = nullptr,
         bool warm_start_trials = false)
         : baseline_(std::move(baseline)),
           boundary_(std::move(boundary)),
-          selection_(selection),
+          rundown_(std::move(rundown)),
           validation_options_(validation_options),
           initial_restart_(initial_restart),
           warm_start_trials_(warm_start_trials) {}
@@ -242,7 +237,8 @@ class LandremanResidual {
         }
         const bool used_restart = restart != nullptr;
         if (used_restart) { request.restart = std::cref(*restart); }
-        if (selection_.selected_case == LandremanCase::QH) {
+        if (rundown_.initialization.radial_transfer ==
+            meow::config::RadialTransfer::CATMULL_ROM) {
             request.radial_transfer = cumes::RadialTransferPolicy::CATMULL_ROM;
         }
         std::optional<cumes::ValidationResult> restart_validated;
@@ -303,22 +299,8 @@ class LandremanResidual {
             return rejected;
         }
 
-        auto spec = target_spec(solved.report.input_params.nfp);
-        const double target_aspect =
-            cumes_meow_example::landreman_target_aspect(
-                selection_.selected_case);
         const cumes_meow_example::CompositeQuasisymmetryTarget target =
-            selection_.selected_case == LandremanCase::QA
-                ? cumes_meow_example::calculate_qa_target(
-                      solved.equilibrium, solved.profiles,
-                      solved.report.input_params, spec, target_aspect,
-                      cumes_meow_example::landreman_targets_mean_iota(
-                          selection_)
-                          ? std::optional<double>(0.42)
-                          : std::nullopt)
-                : cumes_meow_example::calculate_qh_target(
-                      solved.equilibrium, solved.profiles,
-                      solved.report.input_params, spec, target_aspect);
+            calculate_target(solved);
 
         meow::Vector residual(
             static_cast<Eigen::Index>(target.residuals.size()));
@@ -399,17 +381,15 @@ class LandremanResidual {
                                                   cached_outcome_->equilibrium,
                                                   cached_outcome_->profiles);
             const std::vector<double> target_tangent =
-                selection_.selected_case == LandremanCase::QA
-                    ? cumes_meow_example::calculate_qa_target_jvp(
-                          cached_outcome_->equilibrium,
-                          cached_outcome_->profiles, tangent,
-                          cached_outcome_->report.input_params, spec,
-                          cumes_meow_example::landreman_targets_mean_iota(
-                              selection_))
-                    : cumes_meow_example::calculate_qh_target_jvp(
-                          cached_outcome_->equilibrium,
-                          cached_outcome_->profiles, tangent,
-                          cached_outcome_->report.input_params, spec);
+                is_qa() ? cumes_meow_example::calculate_qa_target_jvp(
+                              cached_outcome_->equilibrium,
+                              cached_outcome_->profiles, tangent,
+                              cached_outcome_->report.input_params, spec,
+                              rundown_.target.mean_iota.has_value())
+                        : cumes_meow_example::calculate_qh_target_jvp(
+                              cached_outcome_->equilibrium,
+                              cached_outcome_->profiles, tangent,
+                              cached_outcome_->report.input_params, spec);
             if (target_tangent.size() !=
                 static_cast<std::size_t>(result.rows())) {
                 throw std::runtime_error(
@@ -429,8 +409,7 @@ class LandremanResidual {
 
         const meow::Vector primal_residual = cached_residual_;
         cumes::SolveOutcome primal_outcome = std::move(*cached_outcome_);
-        const auto finite_difference =
-            cumes_meow_example::landreman_finite_difference_policy(selection_);
+        const auto& finite_difference = rundown_.optimizer.jacobian;
         for (const std::size_t column : fallback_columns) {
             const double step =
                 std::max(finite_difference.relative_step *
@@ -476,8 +455,7 @@ class LandremanResidual {
         const cumes::SolveOutcome& primal = *cached_outcome_;
         const meow::Vector primal_residual = cached_residual_;
         meow::Matrix result(primal_residual.size(), x.size());
-        const auto finite_difference =
-            cumes_meow_example::landreman_finite_difference_policy(selection_);
+        const auto& finite_difference = rundown_.optimizer.jacobian;
         cumes::EquilibriumSnapshot restart_equilibrium = primal.equilibrium;
         if (reset_lambda) {
             std::fill(
@@ -511,7 +489,8 @@ class LandremanResidual {
 
             cumes::SolveRequest request;
             request.restart = std::cref(restart_equilibrium);
-            if (selection_.selected_case == LandremanCase::QH) {
+            if (rundown_.initialization.radial_transfer ==
+                meow::config::RadialTransfer::CATMULL_ROM) {
                 request.radial_transfer =
                     cumes::RadialTransferPolicy::CATMULL_ROM;
             }
@@ -562,22 +541,8 @@ class LandremanResidual {
                     boundary_.name(column));
             }
 
-            const auto spec = target_spec(solved.report.input_params.nfp);
-            const double target_aspect =
-                cumes_meow_example::landreman_target_aspect(
-                    selection_.selected_case);
             const cumes_meow_example::CompositeQuasisymmetryTarget target =
-                selection_.selected_case == LandremanCase::QA
-                    ? cumes_meow_example::calculate_qa_target(
-                          solved.equilibrium, solved.profiles,
-                          solved.report.input_params, spec, target_aspect,
-                          cumes_meow_example::landreman_targets_mean_iota(
-                              selection_)
-                              ? std::optional<double>(0.42)
-                              : std::nullopt)
-                    : cumes_meow_example::calculate_qh_target(
-                          solved.equilibrium, solved.profiles,
-                          solved.report.input_params, spec, target_aspect);
+                calculate_target(solved);
             if (target.residuals.size() !=
                 static_cast<std::size_t>(result.rows())) {
                 throw std::runtime_error(
@@ -628,8 +593,7 @@ class LandremanResidual {
         const meow::Vector primal_residual = cached_residual_;
         cumes::SolveOutcome primal_outcome = std::move(*cached_outcome_);
         meow::Matrix result(primal_residual.size(), x.size());
-        const auto finite_difference =
-            cumes_meow_example::landreman_finite_difference_policy(selection_);
+        const auto& finite_difference = rundown_.optimizer.jacobian;
         for (Eigen::Index column = 0; column < x.size(); ++column) {
             const double step =
                 std::max(finite_difference.relative_step * std::abs(x[column]),
@@ -668,8 +632,7 @@ class LandremanResidual {
         const auto start = std::chrono::steady_clock::now();
         const meow::Vector primal_residual = cached_residual_;
         meow::Matrix result(primal_residual.size(), x.size());
-        const auto finite_difference =
-            cumes_meow_example::landreman_finite_difference_policy(selection_);
+        const auto& finite_difference = rundown_.optimizer.jacobian;
         std::size_t jacobian_nonlinear_iterations = 0;
 
         const Eigen::Index workers = static_cast<Eigen::Index>(worker_count);
@@ -698,7 +661,9 @@ class LandremanResidual {
                     std::launch::async,
                     [problem = std::move(problem),
                      validation_options = validation_options_,
-                     selected_case = selection_.selected_case]() mutable {
+                     use_catmull =
+                         rundown_.initialization.radial_transfer ==
+                         meow::config::RadialTransfer::CATMULL_ROM]() mutable {
                         cumes::ValidationResult validated = cumes::validate(
                             std::move(problem), validation_options);
                         if (!validated.has_value()) {
@@ -709,7 +674,7 @@ class LandremanResidual {
                         }
                         cumes::EquilibriumSolver solver;
                         cumes::SolveRequest request;
-                        if (selected_case == LandremanCase::QH) {
+                        if (use_catmull) {
                             request.radial_transfer =
                                 cumes::RadialTransferPolicy::CATMULL_ROM;
                         }
@@ -734,22 +699,7 @@ class LandremanResidual {
                             << " fsql=" << solved.fsql;
                     throw std::runtime_error(message.str());
                 }
-                const auto spec = target_spec(solved.report.input_params.nfp);
-                const double target_aspect =
-                    cumes_meow_example::landreman_target_aspect(
-                        selection_.selected_case);
-                const auto target =
-                    selection_.selected_case == LandremanCase::QA
-                        ? cumes_meow_example::calculate_qa_target(
-                              solved.equilibrium, solved.profiles,
-                              solved.report.input_params, spec, target_aspect,
-                              cumes_meow_example::landreman_targets_mean_iota(
-                                  selection_)
-                                  ? std::optional<double>(0.42)
-                                  : std::nullopt)
-                        : cumes_meow_example::calculate_qh_target(
-                              solved.equilibrium, solved.profiles,
-                              solved.report.input_params, spec, target_aspect);
+                const auto target = calculate_target(solved);
                 if (target.residuals.size() !=
                     static_cast<std::size_t>(result.rows())) {
                     throw std::runtime_error(
@@ -889,8 +839,7 @@ class LandremanResidual {
             throw std::runtime_error("no equilibrium is available to accept");
         }
         baseline_ = boundary_.apply(baseline_, x);
-        if (cumes_meow_example::landreman_refreshes_axis_predictor(
-                selection_)) {
+        if (rundown_.initialization.track_axis_predictor) {
             cumes_meow_example::refresh_axis_predictor_from_equilibrium(
                 baseline_, cached_outcome_->equilibrium);
         }
@@ -903,8 +852,7 @@ class LandremanResidual {
    private:
     cumes::ProblemSpec trial_problem(const meow::Vector& x) const {
         cumes::ProblemSpec problem = boundary_.apply(baseline_, x);
-        if (cumes_meow_example::landreman_refreshes_axis_predictor(
-                selection_)) {
+        if (rundown_.initialization.track_axis_predictor) {
             cumes_meow_example::track_axis_predictor_from_accepted_boundary(
                 problem, baseline_);
         }
@@ -914,22 +862,37 @@ class LandremanResidual {
     cumes_meow_example::FluxSurfaceQuasisymmetryTargetSpec target_spec(
         int nfp) const {
         cumes_meow_example::FluxSurfaceQuasisymmetryTargetSpec spec;
-        spec.helicity_m = 1;
-        spec.helicity_n =
-            selection_.selected_case == LandremanCase::QA ? 0 : -nfp;
-        const double final_weight =
-            cumes_meow_example::landreman_final_surface_weight(selection_);
-        for (int index = 0; index <= 10; ++index) {
-            spec.normalized_toroidal_flux_surfaces.push_back(index / 10.0);
-            spec.surface_weights.push_back(1.0 +
-                                           (final_weight - 1.0) * index / 10.0);
-        }
+        spec.helicity_m = rundown_.target.helicity_m;
+        spec.helicity_n = rundown_.target.helicity_n_per_field_period * nfp;
+        spec.target_ntheta = rundown_.target.ntheta;
+        spec.target_nzeta = rundown_.target.nzeta;
+        spec.normalized_toroidal_flux_surfaces =
+            rundown_.target.normalized_toroidal_flux_surfaces;
+        spec.surface_weights = rundown_.target.surface_weights;
         return spec;
+    }
+
+    bool is_qa() const {
+        return rundown_.selected_case == meow::config::QuasisymmetryCase::QA;
+    }
+
+    cumes_meow_example::CompositeQuasisymmetryTarget calculate_target(
+        const cumes::SolveOutcome& solved) const {
+        const auto spec = target_spec(solved.report.input_params.nfp);
+        return is_qa() ? cumes_meow_example::calculate_qa_target(
+                             solved.equilibrium, solved.profiles,
+                             solved.report.input_params, spec,
+                             rundown_.target.aspect_ratio,
+                             rundown_.target.mean_iota)
+                       : cumes_meow_example::calculate_qh_target(
+                             solved.equilibrium, solved.profiles,
+                             solved.report.input_params, spec,
+                             rundown_.target.aspect_ratio);
     }
 
     cumes::ProblemSpec baseline_;
     cumes_meow_example::StellaratorSymmetricBoundaryParameterization boundary_;
-    LandremanSelection selection_;
+    RelaxationRundown rundown_;
     cumes::SolverOptions validation_options_;
     cumes::EquilibriumSolver solver_;
     const cumes::EquilibriumSnapshot* initial_restart_ = nullptr;
@@ -949,13 +912,13 @@ class LandremanResidual {
 };
 
 std::string step_stem(const std::string& directory,
-                      LandremanWorkflow workflow,
+                      meow::config::WorkflowKind workflow,
                       int max_mode,
                       std::size_t iteration,
                       std::string_view phase = {}) {
     std::ostringstream name;
-    if (workflow == LandremanWorkflow::CONSTRUCTION) {
-        name << cumes_meow_example::landreman_workflow_name(workflow) << "-";
+    if (workflow == meow::config::WorkflowKind::CONSTRUCTION) {
+        name << meow::config::workflow_kind_name(workflow) << "-";
     }
     name << "mode" << max_mode << "_step_" << std::setw(4) << std::setfill('0')
          << iteration;
@@ -964,9 +927,9 @@ std::string step_stem(const std::string& directory,
 }
 
 std::string checkpoint_path(const std::string& output_path,
-                            LandremanWorkflow workflow,
+                            meow::config::WorkflowKind workflow,
                             int max_mode) {
-    if (workflow == LandremanWorkflow::REFINEMENT) {
+    if (workflow == meow::config::WorkflowKind::REFINEMENT) {
         return output_path + ".mode" + std::to_string(max_mode) + ".json";
     }
     return output_path + ".construction.mode" + std::to_string(max_mode) +
@@ -974,7 +937,8 @@ std::string checkpoint_path(const std::string& output_path,
 }
 
 void set_stage_resolution(cumes::ProblemSpec& problem,
-                          const cumes_meow_example::LandremanStage& stage) {
+                          const meow::config::RelaxationStepSpec& step) {
+    const meow::config::EquilibriumStepSpec& stage = step.equilibrium;
     if (stage.mpol == 0 || stage.ntor == 0) { return; }
     const std::vector<double> source_raxis = problem.raxis_c;
     const std::vector<double> source_zaxis = problem.zaxis_s;
@@ -983,7 +947,7 @@ void set_stage_resolution(cumes::ProblemSpec& problem,
     for (cumes::StageRequest& request : problem.stages) {
         request.max_iterations =
             std::max(request.max_iterations,
-                     static_cast<std::size_t>(stage.minimum_niter));
+                     static_cast<std::size_t>(stage.minimum_iterations));
         request.tolerance = std::max(request.tolerance, stage.tolerance_floor);
     }
     const std::size_t axis_size = static_cast<std::size_t>(stage.ntor + 1);
@@ -1022,106 +986,142 @@ void set_stage_tolerances(cumes::ProblemSpec& problem,
     }
 }
 
-void print_usage() {
-    std::cerr
-        << "usage: cumes_landreman_optimize INPUT.json "
-           "qa|qh|qa-construction|qh-construction OUTPUT.json "
-           "[MAX_FUNCTION_EVALUATIONS_PER_STAGE [FIRST_MODE [LAST_MODE "
-           "[MAX_ACCEPTED_ITERATIONS [ITERATION_DIRECTORY "
-           "[JACOBIAN_METHOD [PARALLEL_WORKERS]]]]]]]\n"
-        << "qa/qh run the archived mode-4/mode-5 final refinement. The "
-           "*-construction cases start from the analytic boundary and run "
-           "modes 1-4 (QA) or 1-5 (QH), with the QA iota target enabled. "
-           "Zero or an omitted evaluation limit uses meow's 100*n default. "
-           "FIRST_MODE/LAST_MODE select an ordered subset of the chosen "
-           "workflow. ITERATION_DIRECTORY stores the "
-           "input and native equilibrium for step 0 and every accepted "
-           "iteration. JACOBIAN_METHOD is finite-difference (default), "
-           "broyden, aggressive-broyden, parallel-aggressive-broyden, "
-           "four-worker-aggressive-broyden, "
-           "extended-four-worker-broyden, "
-           "jacobian-scaled, two-accuracy, "
-           "two-accuracy-broyden, geometry-restart-check, "
-           "geometry-restart-finite-difference, hot-finite-difference, "
-           "parallel-finite-difference-check, parallel-finite-difference, "
-           "relaxed-parallel-finite-difference-check, "
-           "parallel-worker-count-check, "
-           "warm-finite-difference, or analytic. PARALLEL_WORKERS overrides "
-           "the batch width for parallel Jacobian methods; it defaults to 2 "
-           "for parallel-* and 4 for legacy four-worker-* selectors.\n";
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 4 || argc > 11) {
-        print_usage();
+    struct CliInput {
+        std::string rundown_path;
+        std::string output_path;
+        std::string first_step;
+        std::string last_step;
+        std::string max_function_evaluations;
+        std::string max_accepted_iterations;
+        std::string iteration_directory;
+        std::string jacobian_method;
+        std::string parallel_workers;
+        bool dry_run;
+    };
+
+    CLAP_BEGIN(CliInput)
+    CLAP_ADD_USAGE("[OPTION]... RUNDOWN.json")
+    CLAP_ADD_DESCRIPTION(
+        "Execute a validated, step-by-step magnetic-equilibrium relaxation "
+        "rundown.")
+    CLAP_REGISTER_ARG(rundown_path)
+    CLAP_REGISTER_OPTION_WITH_DESCRIPTION(
+        output_path, "--output", "-o", "override output.path from the rundown")
+    CLAP_REGISTER_OPTION_WITH_DESCRIPTION(first_step, "--first-step",
+                                          "begin at the named rundown step")
+    CLAP_REGISTER_OPTION_WITH_DESCRIPTION(last_step, "--last-step",
+                                          "finish after the named rundown step")
+    CLAP_REGISTER_OPTION_WITH_DESCRIPTION(
+        max_function_evaluations, "--max-function-evaluations",
+        "override the per-phase residual-evaluation limit")
+    CLAP_REGISTER_OPTION_WITH_DESCRIPTION(
+        max_accepted_iterations, "--max-accepted-iterations",
+        "override the per-phase accepted-step limit")
+    CLAP_REGISTER_OPTION_WITH_DESCRIPTION(
+        iteration_directory, "--iteration-directory",
+        "override the directory for accepted inputs and equilibria")
+    CLAP_REGISTER_OPTION_WITH_DESCRIPTION(jacobian_method, "--jacobian-method",
+                                          "override optimizer.jacobian.method")
+    CLAP_REGISTER_OPTION_WITH_DESCRIPTION(parallel_workers,
+                                          "--parallel-workers",
+                                          "override optimizer.jacobian.workers")
+    CLAP_REGISTER_OPTION_WITH_DESCRIPTION(
+        dry_run, "--dry-run", "validate and print the rundown without solving")
+    CLAP_END(CliInput)
+
+    CliInput cli{};
+    try {
+        CLAP<CliInput>::parse_input(cli, argc, argv);
+    } catch (const std::exception& error) {
+        std::cerr << error.what();
         return 2;
     }
+
     try {
-        const LandremanSelection selection =
-            cumes_meow_example::parse_landreman_selection(argv[2]);
-        const auto stages = cumes_meow_example::landreman_stages(selection);
-        const std::string output_path = argv[3];
-        const std::size_t max_evaluations =
-            argc >= 5 ? std::stoull(argv[4]) : 0;
-        const int first_mode =
-            argc >= 6 ? std::stoi(argv[5]) : stages.front().max_mode;
-        const int last_mode =
-            argc >= 7 ? std::stoi(argv[6]) : stages.back().max_mode;
-        const std::size_t max_accepted_iterations =
-            argc >= 8 ? std::stoull(argv[7]) : 0;
-        const std::string iteration_directory = argc >= 9 ? argv[8] : "";
-        const JacobianMethod jacobian_method =
-            parse_jacobian_method(argc >= 10 ? argv[9] : "finite-difference");
-        const std::size_t parallel_workers =
-            argc >= 11 ? parse_parallel_worker_count(argv[10])
-                       : default_parallel_worker_count(jacobian_method);
-        const auto has_mode = [&](int mode) {
-            for (const auto& stage : stages) {
-                if (stage.max_mode == mode) { return true; }
-            }
-            return false;
-        };
-        if (!has_mode(first_mode) || !has_mode(last_mode) ||
-            first_mode > last_mode) {
-            throw std::invalid_argument(
-                "FIRST_MODE and LAST_MODE must select an ordered subset of "
-                "the chosen workflow");
+        RelaxationRundown rundown =
+            meow::config::read_relaxation_rundown(cli.rundown_path);
+        if (!cli.output_path.empty()) { rundown.output.path = cli.output_path; }
+        if (!cli.iteration_directory.empty()) {
+            rundown.output.iteration_directory = cli.iteration_directory;
         }
+        if (!cli.jacobian_method.empty()) {
+            static_cast<void>(parse_jacobian_method(cli.jacobian_method));
+            rundown.optimizer.jacobian.method = cli.jacobian_method;
+        }
+        if (!cli.parallel_workers.empty()) {
+            rundown.optimizer.jacobian.workers = parse_positive_size(
+                cli.parallel_workers, "--parallel-workers", true);
+        }
+        if (!cli.max_function_evaluations.empty()) {
+            rundown.optimizer.max_function_evaluations = parse_positive_size(
+                cli.max_function_evaluations, "--max-function-evaluations");
+        }
+        if (!cli.max_accepted_iterations.empty()) {
+            rundown.optimizer.max_accepted_iterations = parse_positive_size(
+                cli.max_accepted_iterations, "--max-accepted-iterations");
+        }
+        const JacobianMethod jacobian_method =
+            parse_jacobian_method(rundown.optimizer.jacobian.method);
+        const std::size_t parallel_workers = rundown.optimizer.jacobian.workers;
+
+        const auto find_step = [&](const std::string& name,
+                                   std::size_t fallback) {
+            if (name.empty()) { return fallback; }
+            for (std::size_t index = 0; index < rundown.steps.size(); ++index) {
+                if (rundown.steps[index].name == name) { return index; }
+            }
+            throw std::invalid_argument("unknown rundown step '" + name + "'");
+        };
+        const std::size_t first_step = find_step(cli.first_step, 0);
+        const std::size_t last_step =
+            find_step(cli.last_step, rundown.steps.size() - 1);
+        if (first_step > last_step) {
+            throw std::invalid_argument(
+                "--first-step must not follow --last-step");
+        }
+        std::cout << meow::config::summarize_relaxation_rundown(rundown);
+        std::cout << "selected_steps=" << rundown.steps[first_step].name << ".."
+                  << rundown.steps[last_step].name << '\n';
+        if (cli.dry_run) { return 0; }
 
         cumes::SolverOptions validation_options;
 #ifdef CUMES_USE_FLOAT
         validation_options.precision = cumes::PrecisionPolicy::MIXED_FLOAT;
 #endif
-        cumes::ParsedProblem parsed =
-            cumes::read_problem_spec(argv[1], validation_options);
+        cumes::ParsedProblem parsed = cumes::read_problem_spec(
+            rundown.equilibrium_input, validation_options);
         if (!parsed.report.ok()) {
             throw std::runtime_error(
                 first_error(parsed.report, "input JSON mapping failed"));
         }
         cumes::ProblemSpec current = std::move(parsed.spec);
-        if (selection.workflow == LandremanWorkflow::CONSTRUCTION &&
-            selection.selected_case == LandremanCase::QA &&
-            first_mode == stages.front().max_mode &&
+        if (rundown.initialization.axisymmetric_seed_amplitude.has_value() &&
+            first_step == 0 &&
             cumes_meow_example::seed_landreman_qa_construction_boundary(
-                current)) {
-            std::cout << "seeded_axisymmetric_qa_boundary amplitude=0.0001\n";
+                current, *rundown.initialization.axisymmetric_seed_amplitude)) {
+            std::cout << "seeded_axisymmetric_boundary amplitude="
+                      << *rundown.initialization.axisymmetric_seed_amplitude
+                      << '\n';
         }
-        if (cumes_meow_example::landreman_refreshes_axis_predictor(selection) &&
-            first_mode == stages.front().max_mode) {
+        if (rundown.initialization.track_axis_predictor && first_step == 0) {
             cumes_meow_example::refresh_axis_predictor_from_boundary_centerline(
                 current);
         }
-        write_problem(output_path, current, validation_options);
-        if (!iteration_directory.empty()) {
-            std::filesystem::create_directories(iteration_directory);
+        write_problem(rundown.output.path, current, validation_options);
+        if (!rundown.output.iteration_directory.empty()) {
+            std::filesystem::create_directories(
+                rundown.output.iteration_directory);
         }
         std::optional<cumes::EquilibriumSnapshot> continuation_equilibrium;
 
-        for (const auto& stage : stages) {
-            const int max_mode = stage.max_mode;
-            if (max_mode < first_mode || max_mode > last_mode) { continue; }
+        for (std::size_t step_index = first_step; step_index <= last_step;
+             ++step_index) {
+            const meow::config::RelaxationStepSpec& stage =
+                rundown.steps[step_index];
+            const int max_mode = stage.max_boundary_mode;
             set_stage_resolution(current, stage);
             const std::vector<double> qualified_tolerances =
                 stage_tolerances(current);
@@ -1130,97 +1130,70 @@ int main(int argc, char** argv) {
             const int stage_ns =
                 static_cast<int>(current.stages.back().radial_surfaces);
             const int stage_mnmax = current.mpol * (current.ntor + 1);
-            using AccuracyPhase =
-                std::pair<std::string_view, std::optional<double>>;
-            std::vector<AccuracyPhase> accuracy_phases;
-            const bool uses_two_accuracy =
-                jacobian_method == JacobianMethod::TWO_ACCURACY ||
-                jacobian_method == JacobianMethod::TWO_ACCURACY_BROYDEN;
-            if (uses_two_accuracy) {
-                accuracy_phases.emplace_back("relaxed", 1.0e-9);
-                accuracy_phases.emplace_back("polish", std::nullopt);
-            } else {
-                accuracy_phases.emplace_back("", std::nullopt);
-            }
             std::optional<cumes::EquilibriumSnapshot> phase_equilibrium =
                 continuation_equilibrium;
 
-            for (const AccuracyPhase& phase : accuracy_phases) {
-                const std::string_view phase_name = phase.first;
+            for (const meow::config::RelaxationPhaseSpec& phase :
+                 stage.phases) {
+                const std::string_view phase_name = phase.name;
                 set_stage_tolerances(current, qualified_tolerances,
-                                     phase.second);
+                                     phase.equilibrium_tolerance_floor);
                 const meow::Vector initial = boundary.values(current);
                 const cumes::EquilibriumSnapshot* stage_restart = nullptr;
-                const bool cold_polish =
-                    uses_two_accuracy && phase_name == "polish";
-                if (!cold_polish && phase_equilibrium.has_value() &&
+                if (!phase.cold_start && phase_equilibrium.has_value() &&
                     phase_equilibrium->ns == stage_ns &&
                     phase_equilibrium->mnmax == stage_mnmax) {
                     stage_restart = &*phase_equilibrium;
                 }
                 LandremanResidual residual(
-                    current, boundary, selection, validation_options,
+                    current, boundary, rundown, validation_options,
                     stage_restart,
-                    jacobian_method == JacobianMethod::WARM_FINITE_DIFFERENCE);
+                    rundown.optimizer.jacobian.warm_start_trials);
 
                 meow::TrfOptions options;
-                const auto finite_difference =
-                    cumes_meow_example::landreman_finite_difference_policy(
-                        selection);
                 options.finite_difference_step =
-                    finite_difference.relative_step;
+                    rundown.optimizer.jacobian.relative_step;
                 options.finite_difference_absolute_step =
-                    finite_difference.absolute_step;
-                options.max_function_evaluations = max_evaluations;
-                const bool uses_broyden =
-                    jacobian_method == JacobianMethod::BROYDEN ||
-                    (jacobian_method == JacobianMethod::TWO_ACCURACY_BROYDEN &&
-                     phase_name == "polish");
-                if (uses_broyden) {
-                    options.jacobian_refresh_interval = 5;
-                    options.broyden_min_reduction_ratio = 0.1;
-                    options.broyden_max_secant_error = 0.1;
-                }
-                if (jacobian_method == JacobianMethod::AGGRESSIVE_BROYDEN ||
-                    jacobian_method ==
-                        JacobianMethod::PARALLEL_AGGRESSIVE_BROYDEN ||
-                    jacobian_method ==
-                        JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN) {
-                    options.jacobian_refresh_interval = 8;
-                    options.broyden_min_reduction_ratio = 0.05;
-                    options.broyden_max_secant_error = 0.5;
-                }
-                if (jacobian_method ==
-                    JacobianMethod::EXTENDED_FOUR_WORKER_BROYDEN) {
-                    options.jacobian_refresh_interval = 16;
-                    options.broyden_min_reduction_ratio = 0.0;
-                    options.broyden_max_secant_error = 1.0;
-                }
-                if (jacobian_method == JacobianMethod::JACOBIAN_SCALED) {
-                    options.scale_from_jacobian = true;
-                }
-                if (max_evaluations == 0 && max_accepted_iterations != 0) {
+                    rundown.optimizer.jacobian.absolute_step;
+                options.ftol = rundown.optimizer.ftol;
+                options.xtol = rundown.optimizer.xtol;
+                options.gtol = rundown.optimizer.gtol;
+                options.max_function_evaluations =
+                    rundown.optimizer.max_function_evaluations;
+                options.jacobian_refresh_interval =
+                    rundown.optimizer.jacobian.refresh_interval;
+                options.broyden_min_reduction_ratio =
+                    rundown.optimizer.jacobian.minimum_reduction_ratio;
+                options.broyden_max_secant_error =
+                    rundown.optimizer.jacobian.maximum_secant_error;
+                options.scale_from_jacobian =
+                    rundown.optimizer.jacobian.scale_variables;
+                if (rundown.optimizer.max_function_evaluations == 0 &&
+                    rundown.optimizer.max_accepted_iterations != 0) {
                     const std::size_t evaluations_per_iteration =
                         2 * (boundary.size() + 2);
-                    if (max_accepted_iterations >
+                    if (rundown.optimizer.max_accepted_iterations >
                         std::numeric_limits<std::size_t>::max() /
                             evaluations_per_iteration) {
                         throw std::overflow_error(
                             "accepted-iteration evaluation budget overflow");
                     }
                     options.max_function_evaluations =
-                        max_accepted_iterations * evaluations_per_iteration;
+                        rundown.optimizer.max_accepted_iterations *
+                        evaluations_per_iteration;
                 }
                 options.verbose = 1;
                 std::vector<double> accepted_objectives;
                 options.callback = [&](const meow::Vector& x,
                                        const meow::IterationInfo& info) {
                     current = residual.accept(x);
-                    write_problem(output_path, current, validation_options);
-                    if (!iteration_directory.empty()) {
+                    write_problem(rundown.output.path, current,
+                                  validation_options);
+                    if (!rundown.output.iteration_directory.empty()) {
                         const std::string stem =
-                            step_stem(iteration_directory, selection.workflow,
-                                      max_mode, info.iteration, phase_name);
+                            step_stem(rundown.output.iteration_directory,
+                                      rundown.workflow, max_mode,
+                                      info.iteration, phase_name);
                         write_problem(stem + "-input.json", current,
                                       validation_options);
                         residual.write_equilibrium(x,
@@ -1233,27 +1206,31 @@ int main(int argc, char** argv) {
                     std::cout << " iteration=" << info.iteration
                               << " objective=" << 2.0 * info.cost << '\n';
                     accepted_objectives.push_back(2.0 * info.cost);
-                    bool relaxed_stagnated = false;
-                    if (accepted_objectives.size() >= 4) {
+                    bool phase_stagnated = false;
+                    const std::size_t progress_window =
+                        phase.stopping.progress_window;
+                    if (progress_window != 0 &&
+                        accepted_objectives.size() > progress_window) {
                         const double previous =
-                            accepted_objectives[accepted_objectives.size() - 4];
+                            accepted_objectives[accepted_objectives.size() -
+                                                progress_window - 1];
                         const double current_objective =
                             accepted_objectives.back();
                         const double relative_progress =
                             (previous - current_objective) /
                             std::max(std::abs(previous),
                                      std::numeric_limits<double>::min());
-                        relaxed_stagnated =
-                            info.iteration >= 8 && relative_progress < 0.01;
+                        phase_stagnated =
+                            info.iteration >=
+                                phase.stopping.minimum_iterations &&
+                            relative_progress <
+                                phase.stopping.minimum_relative_progress;
                     }
-                    const bool relaxed_cap_reached =
-                        jacobian_method ==
-                            JacobianMethod::TWO_ACCURACY_BROYDEN &&
-                        phase_name == "relaxed" && relaxed_stagnated;
                     const bool user_cap_reached =
-                        max_accepted_iterations != 0 &&
-                        info.iteration >= max_accepted_iterations;
-                    return !relaxed_cap_reached && !user_cap_reached;
+                        rundown.optimizer.max_accepted_iterations != 0 &&
+                        info.iteration >=
+                            rundown.optimizer.max_accepted_iterations;
+                    return !phase_stagnated && !user_cap_reached;
                 };
 
                 std::cout << "beginning max_mode=" << max_mode;
@@ -1268,10 +1245,10 @@ int main(int argc, char** argv) {
                           << current.stages.back().tolerance
                           << " stage_restart=" << (stage_restart != nullptr)
                           << '\n';
-                if (!iteration_directory.empty()) {
+                if (!rundown.output.iteration_directory.empty()) {
                     const std::string stem =
-                        step_stem(iteration_directory, selection.workflow,
-                                  max_mode, 0, phase_name);
+                        step_stem(rundown.output.iteration_directory,
+                                  rundown.workflow, max_mode, 0, phase_name);
                     write_problem(stem + "-input.json", current,
                                   validation_options);
                     residual.write_equilibrium(initial,
@@ -1490,7 +1467,7 @@ int main(int argc, char** argv) {
                 }
                 current = residual.accept(result.x);
                 phase_equilibrium = residual.equilibrium();
-                write_problem(output_path, current, validation_options);
+                write_problem(rundown.output.path, current, validation_options);
                 std::cout << "finished max_mode=" << max_mode;
                 if (!phase_name.empty()) {
                     std::cout << " phase=" << phase_name;
@@ -1518,9 +1495,9 @@ int main(int argc, char** argv) {
                           << residual.total_linear_iterations() << '\n';
             }
             continuation_equilibrium = std::move(phase_equilibrium);
-            write_problem(
-                checkpoint_path(output_path, selection.workflow, max_mode),
-                current, validation_options);
+            write_problem(checkpoint_path(rundown.output.path, rundown.workflow,
+                                          max_mode),
+                          current, validation_options);
         }
         return 0;
     } catch (const std::exception& error) {

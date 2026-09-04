@@ -470,6 +470,21 @@ RelaxationRundown parse_root(JsonValue root, std::string_view source_path) {
         parse_optimizer(require_key(root, "optimizer", "document"));
     result.output = parse_output(require_key(root, "output", "document"));
 
+    if (result.selected_case == QuasisymmetryCase::QA &&
+        result.target.helicity_n_per_field_period != 0) {
+        fail("target.helicity_n_per_field_period",
+             "must be zero for a QA rundown");
+    }
+    if (result.selected_case == QuasisymmetryCase::QH &&
+        result.target.helicity_n_per_field_period == 0) {
+        fail("target.helicity_n_per_field_period",
+             "must be nonzero for a QH rundown");
+    }
+    if (result.selected_case == QuasisymmetryCase::QH &&
+        result.target.mean_iota.has_value()) {
+        fail("target.mean_iota", "is only supported for a QA rundown");
+    }
+
     const auto& steps =
         require_array(require_key(root, "rundown", "document"), "rundown");
     for (std::size_t index = 0; index < steps.size(); ++index) {

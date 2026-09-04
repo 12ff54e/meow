@@ -1,0 +1,91 @@
+{
+  "schema": "meow-relaxation-rundown-v1",
+  "name": "landreman-qh-refinement",
+  "equilibrium_input": "qh_start.json",
+  "case": "qh",
+  "workflow": "refinement",
+  "target": {
+    "aspect_ratio": 8.0,
+    "mean_iota": null,
+    "helicity_m": 1,
+    "helicity_n_per_field_period": -1,
+    "ntheta": 63,
+    "nzeta": 64,
+    "surfaces": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    "surface_weights": [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0]
+  },
+  "initialization": {
+    "axisymmetric_seed_amplitude": null,
+    "track_axis_predictor": false,
+    "radial_transfer": "catmull-rom"
+  },
+  "optimizer": {
+    "ftol": 1e-8,
+    "xtol": 1e-8,
+    "gtol": 1e-8,
+    "max_function_evaluations": 0,
+    "max_accepted_iterations": 0,
+    "jacobian": {
+      "method": "finite-difference",
+      "workers": 1,
+      "relative_step": 1e-5,
+      "absolute_step": 1e-9,
+      "refresh_interval": 1,
+      "minimum_reduction_ratio": 0.1,
+      "maximum_secant_error": 0.5,
+      "scale_variables": false,
+      "warm_start_trials": false
+    }
+  },
+  "output": {
+    "path": "qh-refined.json",
+    "iteration_directory": ""
+  },
+  "rundown": [
+    {
+      "name": "mode-4",
+      "max_boundary_mode": 4,
+      "equilibrium": {
+        "mpol": 0,
+        "ntor": 0,
+        "minimum_iterations": 0,
+        "tolerance_floor": 0.0
+      },
+      "phases": [
+        {
+          "name": "qualified",
+          "equilibrium_tolerance_floor": null,
+          "cold_start": false,
+          "stopping": {
+            "minimum_iterations": 0,
+            "progress_window": 0,
+            "minimum_relative_progress": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "name": "mode-5",
+      "max_boundary_mode": 5,
+      "equilibrium": {
+        "mpol": 0,
+        "ntor": 0,
+        "minimum_iterations": 0,
+        "tolerance_floor": 0.0
+      },
+      "phases": [
+        {
+          "name": "qualified",
+          "equilibrium_tolerance_floor": null,
+          "cold_start": false,
+          "stopping": {
+            "minimum_iterations": 0,
+            "progress_window": 0,
+            "minimum_relative_progress": 0.0
+          }
+        }
+      ]
+    }
+  ]
+}
+

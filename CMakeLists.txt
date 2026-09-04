@@ -88,9 +88,11 @@ if(MEOW_BUILD_CUMES_INTEGRATION)
     meow_enable_warnings(cumes_landreman_evaluate)
 
     add_executable(cumes_landreman_optimize
-                   examples/cumes_landreman_optimize.cpp)
+                   apps/cumes_landreman_optimize.cpp)
     target_link_libraries(cumes_landreman_optimize PRIVATE
-                          meow::cumes_targets)
+                          meow::cumes_targets meow::rundown)
+    target_include_directories(cumes_landreman_optimize PRIVATE
+                               ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cumes)
     meow_enable_warnings(cumes_landreman_optimize)
 endif()
 
@@ -106,6 +108,9 @@ if(MEOW_BUILD_TESTS)
                    tests/test_relaxation_rundown.cpp)
     target_include_directories(test_relaxation_rundown PRIVATE
                                ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    target_compile_definitions(
+        test_relaxation_rundown
+        PRIVATE MEOW_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
     target_link_libraries(test_relaxation_rundown PRIVATE meow::rundown)
     meow_enable_warnings(test_relaxation_rundown)
     add_test(NAME relaxation_rundown_unit COMMAND test_relaxation_rundown)
@@ -144,6 +149,18 @@ if(MEOW_BUILD_TESTS)
                               meow::cumes_targets)
         meow_enable_warnings(test_landreman_workflow)
         add_test(NAME landreman_workflow_unit COMMAND test_landreman_workflow)
+
+        add_test(
+            NAME relaxation_rundown_cli_dry_run
+            COMMAND cumes_landreman_optimize --dry-run --first-step mode-1
+                    --last-step mode-2
+                    ${CMAKE_CURRENT_SOURCE_DIR}/examples/landreman/qa-construction.rundown.json)
+        set_tests_properties(
+            relaxation_rundown_cli_dry_run
+            PROPERTIES
+                LABELS integration
+                PASS_REGULAR_EXPRESSION
+                    "selected_steps=mode-1..mode-2")
 
         foreach(target IN ITEMS plasma_size magnetic_gradient quasisymmetry)
             add_executable(test_${target}_target tests/test_${target}_target.cpp)
