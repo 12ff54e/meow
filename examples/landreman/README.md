@@ -98,7 +98,7 @@ build-cumes/cumes_landreman_optimize \
   examples/landreman/qh_analytic.json qh-construction qh_constructed.json
 ```
 
-The optional final `JACOBIAN_METHOD` argument selects `finite-difference` (the
+The optional `JACOBIAN_METHOD` argument selects `finite-difference` (the
 qualified default), `broyden`, `aggressive-broyden`, `hot-finite-difference`,
 `parallel-aggressive-broyden`, `four-worker-aggressive-broyden`,
 `extended-four-worker-broyden`, `warm-finite-difference`, `jacobian-scaled`,
@@ -108,14 +108,23 @@ qualified default), `broyden`, `aggressive-broyden`, `hot-finite-difference`,
 `parallel-finite-difference-check`,
 `relaxed-parallel-finite-difference-check`, `parallel-worker-count-check`, or
 `analytic`.
+An optional final `PARALLEL_WORKERS` positive integer controls how many
+independent finite-difference equilibrium solves are launched together. It
+defaults to 2 for the `parallel-*` selectors and 4 for the legacy
+`four-worker-*` selectors. The best value depends on GPU compute and memory
+capacity; four was fastest on the benchmark TITAN Xp, while eight was slower
+for QH and failed a QA perturbation. The fixed `parallel-worker-count-check`
+diagnostic still compares serial, 2-, 4-, and 8-worker Jacobians and ignores
+this argument.
 The non-default methods are experimental. `broyden` uses cold finite-difference
 Jacobian refreshes with safeguarded good-Broyden updates between them.
 `aggressive-broyden` permits an eight-step Jacobian age, a 0.05 minimum trust
 ratio, and a 0.5 maximum relative secant defect for controlled comparisons.
 `parallel-aggressive-broyden` uses those same safeguards while evaluating each
-exact cold refresh with the two-worker callback.
-`four-worker-aggressive-broyden` uses the same policy with four independent
-column workers; the two-worker selector remains available for reproducibility.
+exact cold refresh with the configurable parallel callback.
+`four-worker-aggressive-broyden` is a backward-compatible alias whose omitted
+worker count defaults to four; an explicit `PARALLEL_WORKERS` still overrides
+it.
 `extended-four-worker-broyden` permits 16-step Jacobian age, any positive
 trust-region reduction ratio, and relative secant defect up to 1.0.
 `jacobian-scaled` continues to refresh cold Jacobians on every accepted step
@@ -147,12 +156,12 @@ Restarted equilibria can select a different weak branch and hence a different
 optimizer trajectory, so use explicit `finite-difference` for reproduction
 results.
 Supply the preceding optional arguments when using the selector; for example,
-a matched mode-1 tangent experiment is:
+a four-worker mode-1 aggressive-Broyden run is:
 
 ```bash
 build-cumes/cumes_landreman_optimize \
   examples/landreman/qa_analytic.json qa-construction result.json \
-  0 1 1 0 steps analytic
+  0 1 1 0 steps parallel-aggressive-broyden 4
 ```
 
 The QA construction enables the archived mean-iota target 0.42 and continues

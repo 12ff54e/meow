@@ -1,5 +1,6 @@
 // Reproduce the analytic construction or final refinement from Landreman-Paul.
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <future>
@@ -157,6 +158,30 @@ const char* jacobian_method_name(JacobianMethod method) {
             return "finite-difference";
     }
     return "unknown";
+}
+
+std::size_t default_parallel_worker_count(JacobianMethod method) {
+    if (method == JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN ||
+        method == JacobianMethod::EXTENDED_FOUR_WORKER_BROYDEN) {
+        return 4;
+    }
+    return 2;
+}
+
+std::size_t parse_parallel_worker_count(std::string_view text) {
+    std::size_t result = 0;
+    const char* const begin = text.data();
+    const char* const end = begin + text.size();
+    const auto [parsed_end, error] = std::from_chars(begin, end, result);
+    if (text.empty() || parsed_end != end || error != std::errc{} ||
+        result == 0 ||
+        result > static_cast<std::size_t>(
+                     std::numeric_limits<Eigen::Index>::max())) {
+        throw std::invalid_argument(
+            "PARALLEL_WORKERS must be a positive integer representable by "
+            "Eigen::Index");
+    }
+    return result;
 }
 
 std::string first_error(const cumes::ValidationReport& report,
@@ -756,12 +781,16 @@ class LandremanResidual {
     }
 
     meow::Matrix relaxed_parallel_finite_difference_jacobian(
-        const meow::Vector& x) {
-        return parallel_finite_difference_jacobian(x, 2.0e-12);
+        const meow::Vector& x,
+        std::size_t worker_count) {
+        return parallel_finite_difference_jacobian(x, 2.0e-12, worker_count);
     }
 
-    meow::Matrix four_worker_finite_difference_jacobian(const meow::Vector& x) {
-        return parallel_finite_difference_jacobian(x, std::nullopt, 4);
+    meow::Matrix configured_parallel_finite_difference_jacobian(
+        const meow::Vector& x,
+        std::size_t worker_count) {
+        return parallel_finite_difference_jacobian(x, std::nullopt,
+                                                   worker_count);
     }
 
     meow::Matrix eight_worker_finite_difference_jacobian(
@@ -999,7 +1028,7 @@ void print_usage() {
            "qa|qh|qa-construction|qh-construction OUTPUT.json "
            "[MAX_FUNCTION_EVALUATIONS_PER_STAGE [FIRST_MODE [LAST_MODE "
            "[MAX_ACCEPTED_ITERATIONS [ITERATION_DIRECTORY "
-           "[JACOBIAN_METHOD]]]]]]\n"
+           "[JACOBIAN_METHOD [PARALLEL_WORKERS]]]]]]]\n"
         << "qa/qh run the archived mode-4/mode-5 final refinement. The "
            "*-construction cases start from the analytic boundary and run "
            "modes 1-4 (QA) or 1-5 (QH), with the QA iota target enabled. "
@@ -1017,13 +1046,15 @@ void print_usage() {
            "parallel-finite-difference-check, parallel-finite-difference, "
            "relaxed-parallel-finite-difference-check, "
            "parallel-worker-count-check, "
-           "warm-finite-difference, or analytic.\n";
+           "warm-finite-difference, or analytic. PARALLEL_WORKERS overrides "
+           "the batch width for parallel Jacobian methods; it defaults to 2 "
+           "for parallel-* and 4 for legacy four-worker-* selectors.\n";
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (argc < 4 || argc > 10) {
+    if (argc < 4 || argc > 11) {
         print_usage();
         return 2;
     }
@@ -1043,6 +1074,9 @@ int main(int argc, char** argv) {
         const std::string iteration_directory = argc >= 9 ? argv[8] : "";
         const JacobianMethod jacobian_method =
             parse_jacobian_method(argc >= 10 ? argv[9] : "finite-difference");
+        const std::size_t parallel_workers =
+            argc >= 11 ? parse_parallel_worker_count(argv[10])
+                       : default_parallel_worker_count(jacobian_method);
         const auto has_mode = [&](int mode) {
             for (const auto& stage : stages) {
                 if (stage.max_mode == mode) { return true; }
@@ -1229,6 +1263,7 @@ int main(int argc, char** argv) {
                 std::cout << " variables=" << boundary.size()
                           << " jacobian_method="
                           << jacobian_method_name(jacobian_method)
+                          << " parallel_workers=" << parallel_workers
                           << " equilibrium_tolerance="
                           << current.stages.back().tolerance
                           << " stage_restart=" << (stage_restart != nullptr)
@@ -1288,7 +1323,8 @@ int main(int argc, char** argv) {
                     const meow::Matrix cold =
                         residual.cold_finite_difference_jacobian(initial);
                     meow::Matrix concurrent =
-                        residual.parallel_finite_difference_jacobian(initial);
+                        residual.configured_parallel_finite_difference_jacobian(
+                            initial, parallel_workers);
                     double worst_relative_column_error = 0.0;
                     double mean_relative_column_error = 0.0;
                     for (Eigen::Index column = 0; column < cold.cols();
@@ -1330,7 +1366,7 @@ int main(int argc, char** argv) {
                         residual.cold_finite_difference_jacobian(initial);
                     meow::Matrix relaxed =
                         residual.relaxed_parallel_finite_difference_jacobian(
-                            initial);
+                            initial, parallel_workers);
                     double worst_relative_column_error = 0.0;
                     double mean_relative_column_error = 0.0;
                     for (Eigen::Index column = 0; column < cold.cols();
@@ -1373,8 +1409,8 @@ int main(int argc, char** argv) {
                     const meow::Matrix two_workers =
                         residual.parallel_finite_difference_jacobian(initial);
                     const meow::Matrix four_workers =
-                        residual.four_worker_finite_difference_jacobian(
-                            initial);
+                        residual.configured_parallel_finite_difference_jacobian(
+                            initial, 4);
                     meow::Matrix eight_workers =
                         residual.eight_worker_finite_difference_jacobian(
                             initial);
@@ -1435,7 +1471,7 @@ int main(int argc, char** argv) {
                         std::ref(residual), initial, options,
                         [&](const meow::Vector& x) {
                             return residual.parallel_finite_difference_jacobian(
-                                x);
+                                x, std::nullopt, parallel_workers);
                         });
                 } else if (jacobian_method ==
                                JacobianMethod::FOUR_WORKER_AGGRESSIVE_BROYDEN ||
@@ -1445,7 +1481,8 @@ int main(int argc, char** argv) {
                         std::ref(residual), initial, options,
                         [&](const meow::Vector& x) {
                             return residual
-                                .four_worker_finite_difference_jacobian(x);
+                                .configured_parallel_finite_difference_jacobian(
+                                    x, parallel_workers);
                         });
                 } else {
                     result = meow::trf_least_squares(std::ref(residual),

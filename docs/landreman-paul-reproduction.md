@@ -1230,6 +1230,13 @@ Keep `parallel-worker-count-check` as the fixed serial/2/4/8 characterization
 experiment. Verify the parser/dispatch path with the normal test suite and a
 small integration run that visibly uses a non-default worker count.
 
+Implemented as the final optional CLI argument. A mode-1 QA comparison with
+`PARALLEL_WORKERS=3` reported `workers=3`, reproduced all eight serial Jacobian
+columns exactly (zero Frobenius and per-column error), and reduced Jacobian wall
+time from 3.143 s serial to 1.320 s. Zero workers were rejected before solving,
+and all ten meow tests passed. The three-worker output is
+`../tmp/configurable-workers-three.json`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
