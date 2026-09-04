@@ -622,9 +622,12 @@ class LandremanResidual {
         std::size_t worker_count = 2) {
         struct WorkerResult {
             cumes::SolveOutcome solved;
+            std::optional<cumes_meow_example::CompositeQuasisymmetryTarget>
+                target;
             double validation_seconds = 0.0;
             double solver_construction_seconds = 0.0;
             double solve_seconds = 0.0;
+            double target_seconds = 0.0;
             double worker_seconds = 0.0;
         };
 
@@ -647,6 +650,10 @@ class LandremanResidual {
         double solver_construction_seconds = 0.0;
         double solve_seconds = 0.0;
         double device_seconds = 0.0;
+        double cumes_setup_seconds = 0.0;
+        double cumes_multigrid_seconds = 0.0;
+        double cumes_transfer_seconds = 0.0;
+        double cumes_total_seconds = 0.0;
         double target_seconds = 0.0;
         double assembly_seconds = 0.0;
         double critical_worker_seconds = 0.0;
@@ -683,7 +690,7 @@ class LandremanResidual {
                 steps.push_back(step);
                 futures.emplace_back(std::async(
                     std::launch::async,
-                    [problem = std::move(problem),
+                    [this, problem = std::move(problem),
                      validation_options = validation_options_,
                      use_catmull =
                          rundown_.initialization.radial_transfer ==
@@ -711,10 +718,19 @@ class LandremanResidual {
                         }
                         cumes::SolveOutcome solved =
                             solver.solve(validated.value(), request);
+                        const auto solve_end = std::chrono::steady_clock::now();
+                        std::optional<
+                            cumes_meow_example::CompositeQuasisymmetryTarget>
+                            target;
+                        if (solved.converged &&
+                            solved.has_complete_equilibrium()) {
+                            target.emplace(calculate_target(solved));
+                        }
                         const auto worker_end =
                             std::chrono::steady_clock::now();
                         WorkerResult result;
                         result.solved = std::move(solved);
+                        result.target = std::move(target);
                         result.validation_seconds =
                             std::chrono::duration<double>(construction_start -
                                                           validation_start)
@@ -724,8 +740,11 @@ class LandremanResidual {
                                                           construction_start)
                                 .count();
                         result.solve_seconds = std::chrono::duration<double>(
-                                                   worker_end - solve_start)
+                                                   solve_end - solve_start)
                                                    .count();
+                        result.target_seconds = std::chrono::duration<double>(
+                                                    worker_end - solve_end)
+                                                    .count();
                         result.worker_seconds = std::chrono::duration<double>(
                                                     worker_end - worker_start)
                                                     .count();
@@ -739,9 +758,16 @@ class LandremanResidual {
                 solver_construction_seconds +=
                     worker_result.solver_construction_seconds;
                 solve_seconds += worker_result.solve_seconds;
+                target_seconds += worker_result.target_seconds;
                 batch_worker_seconds.push_back(worker_result.worker_seconds);
                 cumes::SolveOutcome solved = std::move(worker_result.solved);
                 device_seconds += solved.total_device_time_ms * 1.0e-3;
+                cumes_setup_seconds += solved.timings.setup_wall_ms * 1.0e-3;
+                cumes_multigrid_seconds +=
+                    solved.timings.multigrid_wall_ms * 1.0e-3;
+                cumes_transfer_seconds +=
+                    solved.timings.final_state_transfer_wall_ms * 1.0e-3;
+                cumes_total_seconds += solved.timings.total_wall_ms * 1.0e-3;
                 ++evaluation_count_;
                 total_nonlinear_iterations_ += solved.total_iterations;
                 jacobian_nonlinear_iterations += solved.total_iterations;
@@ -757,12 +783,11 @@ class LandremanResidual {
                             << " fsql=" << solved.fsql;
                     throw std::runtime_error(message.str());
                 }
-                const auto target_start = std::chrono::steady_clock::now();
-                const auto target = calculate_target(solved);
-                target_seconds +=
-                    std::chrono::duration<double>(
-                        std::chrono::steady_clock::now() - target_start)
-                        .count();
+                if (!worker_result.target.has_value()) {
+                    throw std::runtime_error(
+                        "parallel worker did not produce target residuals");
+                }
+                const auto& target = *worker_result.target;
                 if (target.residuals.size() !=
                     static_cast<std::size_t>(result.rows())) {
                     throw std::runtime_error(
@@ -807,6 +832,10 @@ class LandremanResidual {
                   << solver_construction_seconds
                   << " solve_seconds=" << solve_seconds
                   << " device_seconds=" << device_seconds
+                  << " cumes_setup_seconds=" << cumes_setup_seconds
+                  << " cumes_multigrid_seconds=" << cumes_multigrid_seconds
+                  << " cumes_transfer_seconds=" << cumes_transfer_seconds
+                  << " cumes_total_seconds=" << cumes_total_seconds
                   << " critical_worker_seconds=" << critical_worker_seconds
                   << " batch_tail_idle_seconds=" << batch_tail_idle_seconds
                   << " target_seconds=" << target_seconds
