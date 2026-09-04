@@ -1270,6 +1270,40 @@ optimization output remains useful. Store experiment artifacts under sibling
 `../tmp`, never `/tmp`. Reject any implementation whose added scheduling cost
 outweighs the measured host-side work.
 
+The four-worker Release profiles showed that facade construction and cuMES
+setup are not useful optimization targets. Across the eight mode-1 columns,
+QA spent 3.245 s inside cuMES: 3.240 s in multigrid, 0.00381 s in setup, and
+0.000512 s transferring the final state. QH spent 2.580 s inside cuMES:
+2.575 s in multigrid, 0.00492 s in setup, and 0.000502 s in final transfer.
+Thus setup was only 0.12% of QA and 0.19% of QH summed solve time.
+
+Target calculation was independent for each perturbation, so it was moved into
+the same worker immediately after that worker's equilibrium converged. In a
+controlled Release comparison against the pre-overlap commit, QA Jacobian wall
+time fell from 0.882 s to 0.852 s (1.035x), and QH fell from 0.733 s to 0.684 s
+(1.072x). Both concurrent Jacobians remained bit-identical to their serial
+controls and retained exactly 12,817 QA and 8,347 QH nonlinear iterations. All
+12 meow tests passed against the instrumented cuMES interface. The profiles and
+equilibrium artifacts are under `../tmp/meow-jacobian-pipeline-profile`.
+
+### Dynamic Jacobian scheduling plan
+
+The parallel callback still executes fixed batches of `workers` columns. A
+shorter solve cannot accept another column until the slowest solve in its batch
+finishes. The structured mode-1 profiles measured 0.119 s of aggregate QA
+worker tail-idle and 0.112--0.155 s for QH, making dynamic scheduling the next
+bounded meow-side experiment.
+
+Preconstruct every perturbed problem and difference step in column order, then
+launch at most the configured number of long-lived async workers. Each worker
+claims the next unprocessed column from an atomic counter and performs the same
+validation, cold cuMES solve, and target evaluation. Store results by original
+column index so matrix assembly and diagnostics remain deterministic. Do not
+change tolerances, finite-difference steps, solver requests, or failure gates.
+Compare QA and QH mode-1 Jacobians bit-for-bit with the serial controls and with
+the fixed-batch timing above. Retain the scheduler only if it reduces Release
+wall time without changing nonlinear iteration counts or increasing failures.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
