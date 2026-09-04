@@ -1213,6 +1213,23 @@ was not the failure; extra trial/center solves overwhelmed the saved
 Jacobians. The eight-step/0.5-defect four-worker policy remains qualified.
 Artifacts are under `../tmp/extended-four-worker-broyden-mode1/qa`.
 
+### Configurable Jacobian-worker plan
+
+The measured four-worker optimum is specific to the TITAN Xp used for the
+benchmarks above. Other GPUs can have different concurrency and memory limits,
+so worker count must be an execution parameter rather than an optimizer-policy
+choice. Add an optional final `PARALLEL_WORKERS` command-line argument to the
+Landreman optimizer. It will select the batch width used for independent
+finite-difference equilibrium solves by the production parallel Jacobian
+methods and their serial-comparison diagnostics. A missing argument will retain
+the existing two-worker default for `parallel-*` selectors and four-worker
+default for the legacy `four-worker-*` selectors. Reject zero and counts that
+cannot be represented by the optimizer's index type, report the selected count
+in the stage log, and document that the useful value is hardware-dependent.
+Keep `parallel-worker-count-check` as the fixed serial/2/4/8 characterization
+experiment. Verify the parser/dispatch path with the normal test suite and a
+small integration run that visibly uses a non-default worker count.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
