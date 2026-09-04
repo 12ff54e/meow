@@ -654,6 +654,11 @@ class LandremanResidual {
         double cumes_multigrid_seconds = 0.0;
         double cumes_transfer_seconds = 0.0;
         double cumes_total_seconds = 0.0;
+        double stage_setup_seconds = 0.0;
+        double stage_iteration_seconds = 0.0;
+        double stage_output_seconds = 0.0;
+        double stage_teardown_seconds = 0.0;
+        double multigrid_other_seconds = 0.0;
         double target_seconds = 0.0;
         double assembly_seconds = 0.0;
         double critical_worker_seconds = 0.0;
@@ -768,6 +773,16 @@ class LandremanResidual {
                 cumes_transfer_seconds +=
                     solved.timings.final_state_transfer_wall_ms * 1.0e-3;
                 cumes_total_seconds += solved.timings.total_wall_ms * 1.0e-3;
+                stage_setup_seconds +=
+                    solved.timings.stage_setup_wall_ms * 1.0e-3;
+                stage_iteration_seconds +=
+                    solved.timings.stage_iteration_wall_ms * 1.0e-3;
+                stage_output_seconds +=
+                    solved.timings.stage_output_wall_ms * 1.0e-3;
+                stage_teardown_seconds +=
+                    solved.timings.stage_teardown_wall_ms * 1.0e-3;
+                multigrid_other_seconds +=
+                    solved.timings.multigrid_other_wall_ms * 1.0e-3;
                 ++evaluation_count_;
                 total_nonlinear_iterations_ += solved.total_iterations;
                 jacobian_nonlinear_iterations += solved.total_iterations;
@@ -836,6 +851,11 @@ class LandremanResidual {
                   << " cumes_multigrid_seconds=" << cumes_multigrid_seconds
                   << " cumes_transfer_seconds=" << cumes_transfer_seconds
                   << " cumes_total_seconds=" << cumes_total_seconds
+                  << " stage_setup_seconds=" << stage_setup_seconds
+                  << " stage_iteration_seconds=" << stage_iteration_seconds
+                  << " stage_output_seconds=" << stage_output_seconds
+                  << " stage_teardown_seconds=" << stage_teardown_seconds
+                  << " multigrid_other_seconds=" << multigrid_other_seconds
                   << " critical_worker_seconds=" << critical_worker_seconds
                   << " batch_tail_idle_seconds=" << batch_tail_idle_seconds
                   << " target_seconds=" << target_seconds
