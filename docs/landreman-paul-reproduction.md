@@ -1159,6 +1159,16 @@ the isolated-Jacobian ratios are expected because accepted-center and trial
 solves remain serial. Both cases proceed to full construction. Mode-1
 artifacts are under `../tmp/four-worker-aggressive-broyden-mode1`.
 
+The complete four-worker QA construction took 563.79 s and reproduced every
+two-worker/serial aggressive-Broyden endpoint, including the final
+`4.09894575473e-7` objective. It is 1.420x faster than the two-worker combined
+run (800.78 s), 2.146x faster than serial aggressive Broyden (1,209.77 s), and
+2.727x faster than the historical cold run (1,537.26 s). Equilibrium counts,
+nonlinear iterations, and all 35 secant updates are identical to the
+two-worker combined run; only exact-refresh scheduling changed. Peak RSS was
+325,656 KiB. Full QA artifacts are under
+`../benchmark-four-worker-aggressive-broyden-20260904/qa`.
+
 ## cuMES final-boundary cross-check
 
 `cumes_landreman_evaluate` solves the checked-in final boundaries and applies
