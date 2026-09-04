@@ -35,11 +35,11 @@ git config core.hooksPath .githooks
 
 ```text
 apps/                 production command-line frontends
+include/              shared command-line and JSON parsing utilities
 include/meow/         public optimizer, configuration, and cuMES target APIs
 src/                  compiled optimizer and configuration implementations
 examples/landreman/   equilibrium inputs and reproducible rundown JSON files
 tests/                standalone C++ and Python verification
-third_party/cumes/    vendored command-line and JSON parsing utilities
 docs/                 numerical contracts and reproduction records
 ```
 

@@ -11,12 +11,13 @@ option(MEOW_BUILD_CUMES_INTEGRATION
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
-add_library(meow_json src/third_party/json_parser.cpp)
+add_library(meow_json src/json_parser.cpp)
 target_compile_features(meow_json PUBLIC cxx_std_20)
 target_include_directories(
     meow_json
-    PRIVATE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/third_party/cumes>)
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
 
 add_library(meow_rundown src/config/relaxation_rundown.cpp)
 add_library(meow::rundown ALIAS meow_rundown)
@@ -26,8 +27,7 @@ target_include_directories(
     meow_rundown
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cumes)
+        $<INSTALL_INTERFACE:include>)
 
 add_library(meow_trf src/trf.cpp)
 add_library(meow::trf ALIAS meow_trf)
@@ -91,8 +91,6 @@ if(MEOW_BUILD_CUMES_INTEGRATION)
                    apps/cumes_landreman_optimize.cpp)
     target_link_libraries(cumes_landreman_optimize PRIVATE
                           meow::cumes_targets meow::rundown)
-    target_include_directories(cumes_landreman_optimize PRIVATE
-                               ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cumes)
     meow_enable_warnings(cumes_landreman_optimize)
 endif()
 
