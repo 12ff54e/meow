@@ -266,7 +266,14 @@ value. The 93 accepted/initial input-equilibrium pairs, five stage checkpoints,
 latest checkpoint, and complete log are stored in
 `../opt-qh-analytic-accepted-axis`.
 
-The implementation executable is `cumes_landreman_optimize`. Its optimizer
+The implementation executable is `cumes_landreman_optimize`. Its current CLI
+accepts one strict `meow-relaxation-rundown-v1` JSON file; canonical QA/QH
+construction and refinement rundowns are checked in under
+`examples/landreman/`. See `docs/relaxation-rundown.md`. Dated command lines
+later in this investigation record the former positional CLI and are retained
+as historical experiment provenance.
+
+Its optimizer
 variables are absolute Fourier coefficients, matching SIMSOPT's relative-step
 definition. It persistently writes strict cuMES input JSON after accepted
 iterations, so a long run can be inspected or restarted without translating a

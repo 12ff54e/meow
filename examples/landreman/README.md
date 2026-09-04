@@ -79,151 +79,62 @@ QH evaluation requests cuMES's retained Catmull-Rom radial transfer because
 the default B-spline transfer invalidates the 100-to-150 surface transition
 for this configuration.
 
-After configuring meow with `MEOW_BUILD_CUMES_INTEGRATION=ON`, run the final
-two-stage refinements with:
+## Run the reproductions
+
+Configure meow with `MEOW_BUILD_CUMES_INTEGRATION=ON`. The four runnable
+workflows are fully described by adjacent `*.rundown.json` files:
 
 ```bash
 build-cumes/cumes_landreman_optimize \
-  examples/landreman/qa_start.json qa qa_optimized.json
+  examples/landreman/qa-construction.rundown.json
 build-cumes/cumes_landreman_optimize \
-  examples/landreman/qh_start.json qh qh_optimized.json
+  examples/landreman/qh-construction.rundown.json
+
+build-cumes/cumes_landreman_optimize \
+  examples/landreman/qa-refinement.rundown.json
+build-cumes/cumes_landreman_optimize \
+  examples/landreman/qh-refinement.rundown.json
 ```
 
-Run the earlier analytic construction stages with:
+Validate and inspect a plan without launching an equilibrium solve:
+
+```bash
+build-cumes/cumes_landreman_optimize --dry-run \
+  examples/landreman/qa-construction.rundown.json
+```
+
+For scheduler-sized continuation, select an ordered subset by step name and
+override the output location:
 
 ```bash
 build-cumes/cumes_landreman_optimize \
-  examples/landreman/qa_analytic.json qa-construction qa_constructed.json
-build-cumes/cumes_landreman_optimize \
-  examples/landreman/qh_analytic.json qh-construction qh_constructed.json
+  --first-step mode-1 --last-step mode-2 \
+  --output ../opt-qa/latest.json \
+  --iteration-directory ../opt-qa/steps \
+  examples/landreman/qa-construction.rundown.json
 ```
 
-The optional `JACOBIAN_METHOD` argument selects `finite-difference` (the
-qualified default), `broyden`, `aggressive-broyden`, `hot-finite-difference`,
-`parallel-aggressive-broyden`, `four-worker-aggressive-broyden`,
-`extended-four-worker-broyden`, `warm-finite-difference`, `jacobian-scaled`,
-`two-accuracy`,
-`two-accuracy-broyden`, `geometry-restart-finite-difference`,
-`geometry-restart-check`, `parallel-finite-difference`,
-`parallel-finite-difference-check`,
-`relaxed-parallel-finite-difference-check`, `parallel-worker-count-check`, or
-`analytic`.
-An optional final `PARALLEL_WORKERS` positive integer controls how many
-independent finite-difference equilibrium solves are launched together. It
-defaults to 2 for the `parallel-*` selectors and 4 for the legacy
-`four-worker-*` selectors. The best value depends on GPU compute and memory
-capacity; four was fastest on the benchmark TITAN Xp, while eight was slower
-for QH and failed a QA perturbation. The fixed `parallel-worker-count-check`
-diagnostic still compares serial, 2-, 4-, and 8-worker Jacobians and ignores
-this argument.
-The non-default methods are experimental. `broyden` uses cold finite-difference
-Jacobian refreshes with safeguarded good-Broyden updates between them.
-`aggressive-broyden` permits an eight-step Jacobian age, a 0.05 minimum trust
-ratio, and a 0.5 maximum relative secant defect for controlled comparisons.
-`parallel-aggressive-broyden` uses those same safeguards while evaluating each
-exact cold refresh with the configurable parallel callback.
-`four-worker-aggressive-broyden` is a backward-compatible alias whose omitted
-worker count defaults to four; an explicit `PARALLEL_WORKERS` still overrides
-it.
-`extended-four-worker-broyden` permits 16-step Jacobian age, any positive
-trust-region reduction ratio, and relative secant defect up to 1.0.
-`jacobian-scaled` continues to refresh cold Jacobians on every accepted step
-but derives variable scales from their column norms.
-`two-accuracy` first optimizes each boundary-mode stage with a relaxed
-`1e-9` equilibrium tolerance, then restores the input's qualified tolerances
-and polishes the same stage. Only the polished equilibrium continues to the
-next stage; logs and optional step files label both phases.
-`two-accuracy-broyden` switches from the relaxed phase after at least eight
-steps when its objective improves by less than 1% over three accepted steps,
-then uses the safeguarded Broyden policy for the qualified polishing phase.
-`geometry-restart-finite-difference` forms each target column by restarting
-from the primal `R,Z` geometry with both lambda parity families reset to zero.
-Use `geometry-restart-check` on a selected stage to compare those columns
-directly with complete cold finite differences without optimizing.
-`parallel-finite-difference` evaluates pairs of cold Jacobian columns with
-independent solver instances. Use `parallel-finite-difference-check` to compare
-the concurrent and serial matrices directly before timing an optimization.
-`relaxed-parallel-finite-difference-check` instead solves only the perturbed
-columns at tolerance `2e-12` and compares them with the qualified cold matrix;
-it is diagnostic-only until that derivative-accuracy gate passes.
-`parallel-worker-count-check` times qualified serial, two-, four-, and
-eight-worker Jacobians at the selected stage and checks every concurrent matrix
-against the serial result.
-`hot-finite-difference` retains its historical `1e-4` step floor, while
-`warm-finite-difference` uses the qualified case-specific step exactly and
-also initializes trust-region trials from the last accepted equilibrium.
-Restarted equilibria can select a different weak branch and hence a different
-optimizer trajectory, so use explicit `finite-difference` for reproduction
-results.
-Supply the preceding optional arguments when using the selector; for example,
-a four-worker mode-1 aggressive-Broyden run is:
+The construction rundowns start at the sparse analytic inputs. QA enables the
+archived mean-iota target 0.42 and boundary modes 1--4; QH omits the iota
+residual and continues through mode 5. Both use uniform radial QS weights and
+the archived transform resolutions and equilibrium work allowances.
 
-```bash
-build-cumes/cumes_landreman_optimize \
-  examples/landreman/qa_analytic.json qa-construction result.json \
-  0 1 1 0 steps parallel-aggressive-broyden 4
-```
+The refinement rundowns start at `qa_start.json` and `qh_start.json`, run
+boundary modes 4 and 5 at the input equilibrium resolution, omit the iota
+residual, and apply the paper's final radial weight ramps (1 to 30 for QA and
+1 to 2 for QH).
 
-The QA construction enables the archived mean-iota target 0.42 and continues
-through maximum boundary modes 1, 2, 3, and 4. The QH construction has no iota
-target and continues through modes 1, 2, 3, 4, and 5. Both use uniform radial
-QS weights. Their equilibrium transform resolutions follow the archived
-drivers: 3, 5, 6, 6 for QA and 3, 5, 6, 6, 6 for QH. The existing `qa` and
-`qh` case names remain the separate final-refinement policy, which removes the
-QA iota residual and applies the final edge-weight ramps.
+The qualified reproduction policy remains cold one-sided finite differences:
+relative/absolute steps are `3.1622776601683794e-3` / `1e-7` for QA
+construction, `1e-3` / `1e-7` for QH construction, and `1e-5` / `1e-9`
+for both refinements. QH uses the retained Catmull-Rom radial transfer.
 
-The experimental `analytic` path obtains its dense target Jacobian from cuMES
-equilibrium tangents: one nonlinear equilibrium is retained while one
-matrix-free linear solve is applied per boundary variable, and meow
-differentiates the target. The experimental `hot-finite-difference` path
-instead re-solves each perturbed equilibrium from the retained final-grid
-state, with cold and backward-difference fallbacks at feasibility boundaries.
-The archived and qualified default path uses cold one-sided finite differences.
-Its relative/absolute steps remain recorded in the workflow policy:
-`3.1622776601683794e-3` / `1e-7` for QA construction, `1e-3` / `1e-7` for QH
-construction, and `1e-5` / `1e-9` for the refinements.
+Every accepted iteration updates `output.path`. When
+`output.iteration_directory` is nonempty, the run also stores paired
+`*-input.json` and `*-equilibrium.bin` artifacts. Construction checkpoints
+use `.construction.modeM.json`; refinement checkpoints use `.modeM.json`.
 
-The exact analytic QA boundary is an axisymmetric stationary point: mean iota
-and QA error have zero first derivative with respect to every 3-D boundary
-mode. The archived one-sided difference supplied the symmetry-breaking
-direction implicitly. For analytic tangents, `qa-construction` explicitly
-adds a deterministic chiral seed of amplitude `1e-4` only when all active 3-D
-modes are exactly zero. Any user-supplied 3-D boundary is left unchanged.
-
-At construction resolution 6, cuMES is allowed 10,000 iterations per radial
-stage for mode 3 and 30,000 for QA mode 4. These larger caps were exposed by
-the first, incorrect-finite-difference trajectory. The corrected construction
-restores the common `1e-12` equilibrium gate; the cap provides work allowance
-without changing that gate.
-
-Construction checkpoints are named
-`.construction.modeM.json`, and archived equilibria use
-`construction-modeM_step_NNNN-equilibrium.bin`. This keeps construction mode
-4 distinct from the later refinement mode 4 when both workflows share an
-output directory.
-
-Each run varies modes through 4 and then 5. It updates the requested output
-after every accepted optimizer iteration and also writes `.mode4.json` and
-`.mode5.json` snapshots. All files use cuMES's strict, read-back-compatible
-input schema. The optional fourth argument caps function evaluations per
-stage; omit it for the meow default. An analytic mode-4/mode-5 Jacobian still
-has 80/120 columns, but those columns are linear tangent solves sharing one
-converged equilibrium and retained CUDA operator context rather than 81/121
-nonlinear equilibrium solves.
-
-Two further optional arguments select the first and last mode stage. For
-example, append `0 4 4` to a refinement run to run mode 4 only, then use its
-`.mode4.json` as the input to a separate run ending in `0 5 5`. Appending
-`0 1 2` to a construction run selects its first two stages. This is the
-supported checkpointed workflow for scheduler time limits.
-
-The next optional argument limits accepted optimizer iterations per stage. A
-final directory argument stores `modeM_step_NNNN-input.json` and
-`modeM_step_NNNN-equilibrium.bin` for the initial state (`NNNN=0000`) and
-every accepted iteration. For example, a 100-step mode-4 QA run is:
-
-```bash
-build-cumes/cumes_landreman_optimize \
-  examples/landreman/qa_start.json qa ../opt-qa-test/latest.json \
-  0 4 4 100 ../opt-qa-test
-```
+All numerical policy—including experimental parallel, analytic, Broyden, and
+multi-accuracy variants—is expressed in the rundown rather than inferred from
+a method name. The full field reference and CLI override list are documented
+in [the rundown schema](../../docs/relaxation-rundown.md).

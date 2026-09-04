@@ -31,6 +31,39 @@ formatter as cuMES. Activate the versioned hook after cloning with:
 git config core.hooksPath .githooks
 ```
 
+## Project structure
+
+```text
+apps/                 production command-line frontends
+include/meow/         public optimizer, configuration, and cuMES target APIs
+src/                  compiled optimizer and configuration implementations
+examples/landreman/   equilibrium inputs and reproducible rundown JSON files
+tests/                standalone C++ and Python verification
+third_party/cumes/    vendored command-line and JSON parsing utilities
+docs/                 numerical contracts and reproduction records
+```
+
+The base build contains TRF and the strict rundown parser and does not require
+CUDA. Configure with `MEOW_BUILD_CUMES_INTEGRATION=ON` and a discoverable
+cuMES package to build the equilibrium-backed applications.
+
+## JSON-driven relaxation
+
+The Landreman QA/QH workflow is now an explicit sequence rather than a set of
+positional arguments and case-name defaults:
+
+```bash
+build-cumes/cumes_landreman_optimize --dry-run \
+  examples/landreman/qa-construction.rundown.json
+
+build-cumes/cumes_landreman_optimize \
+  examples/landreman/qa-construction.rundown.json
+```
+
+The rundown owns target composition, initialization and continuation,
+Jacobian policy, optimizer tolerances, output policy, and every relaxation
+step/phase. See [the schema reference](docs/relaxation-rundown.md).
+
 ## C++ API
 
 ```cpp
